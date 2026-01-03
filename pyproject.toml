@@ -1,0 +1,54 @@
+[project]
+name = "contextual-research-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pre-commit>=4.5.1", "ruff>=0.14.10"]
+
+[tool.ruff]
+line-length = 100
+format = { docstring-code-format = true }
+
+[tool.ruff.lint]
+select = [
+    # isort
+    "I",
+    # pycodestyle
+    "E",
+    "W",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # flake8-builtins
+    "A",
+    # flake8-return
+    "RET",
+    # flake8-use-pathlib
+    "PTH",
+    # flynt
+    "FLY",
+    # mccabe
+    "C90",
+    # NumPy-specific rules
+    "NPY",
+    # pep8-naming
+    "N",
+    # Ruff-specific rules
+    "RUF",
+    # Pylint - very strict, may be use when have enough time
+    "PL",
+    # refurb - also may be overwhelming
+    "FURB",
+]
+ignore = ["N812"]
+
+pycodestyle = { max-doc-length = 105 }
