@@ -1,0 +1,2 @@
+class DBError(RuntimeError):
+    pass
