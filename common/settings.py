@@ -15,8 +15,6 @@ class AppSettings(BaseSettings):
     Secrets configuration.
     """
 
-    ENV_DIR = Path(__file__).resolve().parents[1] / "env"
-
     env: Literal["dev", "prod"] = Field(default="dev")
     debug: bool = Field(default=False)
 
