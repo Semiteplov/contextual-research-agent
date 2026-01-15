@@ -20,6 +20,9 @@ dependencies = [
     "seaborn>=0.13.2",
 ]
 
+[project.scripts]
+cra = "contextual_research_agent.cli:main"
+
 [dependency-groups]
 dev = ["pre-commit>=4.5.1", "ruff>=0.14.10"]
 

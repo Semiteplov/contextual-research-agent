@@ -1,12 +1,13 @@
-import logging
 import zipfile
 from pathlib import Path
 from urllib import error, request
 
+from contextual_research_agent.common.logging import get_logger
+
 KAGGLE_DOWNLOAD_PATH = ".cache/kaggle"
 KAGGLE_ARXIV_URL = "https://www.kaggle.com/api/v1/datasets/download/Cornell-University/arxiv"
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DatasetDownloadError(RuntimeError):
