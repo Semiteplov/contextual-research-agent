@@ -30,22 +30,22 @@ def _sync_category(
     papers_repo = PapersMetadataRepository(conn)
     sync_repo = SyncStateRepository(conn)
 
-    # Get last sync timestamp
     last_synced_at = sync_repo.get(category)
-    logger.info("Category=%s last_synced_at=%s", category, last_synced_at)
+    if last_synced_at is None:
+        last_synced_at = datetime.now(UTC) - timedelta(days=8)
+        logger.info("Category=%s no sync_state; using lookback since=%s", category, last_synced_at)
+    else:
+        logger.info("Category=%s last_synced_at=%s", category, last_synced_at)
 
-    # Fetch new entries from arXiv
     entries, newest_published = client.fetch_category(category, last_synced_at)
 
     if not entries:
         logger.info("Category=%s: no new entries", category)
         return 0
 
-    # Convert and upsert
     paper_rows = entries_to_paper_rows(entries, fallback_category=category)
     upserted = papers_repo.upsert(paper_rows)
 
-    # Update sync state
     if newest_published is not None:
         sync_repo.upsert(category, newest_published)
 
@@ -111,6 +111,7 @@ with DAG(
     default_args={
         "retries": 2,
         "retry_delay": timedelta(minutes=10),
+        "execution_timeout": timedelta(hours=2),
     },
     tags=["arxiv", "metadata", "weekly"],
 ) as dag:

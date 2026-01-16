@@ -5,8 +5,6 @@ if TYPE_CHECKING:
 
 
 class BaseRepository:
-    """Base class for database repositories."""
-
     __slots__ = ("_conn",)
 
     def __init__(self, conn: "PGConnection") -> None:

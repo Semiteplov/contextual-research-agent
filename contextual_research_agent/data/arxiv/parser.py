@@ -16,8 +16,6 @@ class ArxivParseError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class PaperRow:
-    """Represents a single arXiv paper metadata record."""
-
     arxiv_id: str
     title: str
     abstract: str
@@ -75,12 +73,10 @@ def iter_papers_jsonl(
 
 
 def is_ml_paper(categories: Iterable[str], allowed: Set[str]) -> bool:
-    """Check if paper belongs to any of the allowed categories."""
     return any(cat in allowed for cat in categories)
 
 
 def _parse_record(obj: dict) -> PaperRow | None:
-    """Parse single JSON record into PaperRow."""
     arxiv_id = str(obj.get("id") or "").strip()
     if not arxiv_id:
         return None
@@ -104,7 +100,6 @@ def _parse_record(obj: dict) -> PaperRow | None:
 
 
 def _parse_categories(value: str | None) -> list[str]:
-    """Parse space-separated categories, preserving order and removing duplicates."""
     if not value:
         return []
 
@@ -121,7 +116,6 @@ def _parse_categories(value: str | None) -> list[str]:
 
 
 def _parse_latest_version(versions: list[dict] | None) -> tuple[int | None, datetime | None]:
-    """Extract version number and creation date from versions list."""
     if not versions:
         return None, None
 
@@ -142,7 +136,6 @@ def _parse_latest_version(versions: list[dict] | None) -> tuple[int | None, date
 
 
 def _parse_datetime(value: str) -> datetime | None:
-    """Parse RFC 2822 datetime string (e.g., 'Mon, 2 Apr 2007 19:18:42 GMT')."""
     try:
         dt = parsedate_to_datetime(value)
         if dt.tzinfo is None:
@@ -153,7 +146,6 @@ def _parse_datetime(value: str) -> datetime | None:
 
 
 def _parse_date(value: str | None) -> date | None:
-    """Parse ISO date string (e.g., '2008-11-26')."""
     if not value:
         return None
     try:

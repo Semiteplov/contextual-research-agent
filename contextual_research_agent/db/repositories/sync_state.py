@@ -14,8 +14,6 @@ logger = get_logger(__name__)
 
 
 class SyncStateRepository(BaseRepository):
-    """Repository for tracking arXiv category sync state."""
-
     TABLE_NAME = "arxiv_category_sync_state"
 
     def __init__(self, conn: "PGConnection") -> None:

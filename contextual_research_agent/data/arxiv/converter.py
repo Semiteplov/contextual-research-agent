@@ -3,7 +3,6 @@ from contextual_research_agent.data.arxiv.schemas import ParsedEntry
 
 
 def entry_to_paper_row(entry: ParsedEntry, fallback_category: str) -> PaperRow:
-    """Convert ParsedEntry to PaperRow for database storage."""
     return PaperRow(
         arxiv_id=entry.arxiv_id,
         title=entry.title,
@@ -23,5 +22,4 @@ def entries_to_paper_rows(
     entries: list[ParsedEntry],
     fallback_category: str,
 ) -> list[PaperRow]:
-    """Convert list of ParsedEntry to list of PaperRow."""
     return [entry_to_paper_row(e, fallback_category) for e in entries]

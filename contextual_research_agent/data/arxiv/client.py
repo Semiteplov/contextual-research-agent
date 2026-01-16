@@ -14,8 +14,6 @@ logger = get_logger(__name__)
 
 
 class ArxivClientConfig:
-    """Configuration for arXiv API client."""
-
     API_URL = "http://export.arxiv.org/api/query"
     USER_AGENT = "contextual-research-agent/1.0"
 
@@ -29,7 +27,6 @@ class ArxivClientConfig:
     BACKOFF_MAX_SECONDS = 30.0
 
 
-# XML namespaces for Atom feed parsing
 _ATOM_NS = {
     "atom": "http://www.w3.org/2005/Atom",
     "arxiv": "http://arxiv.org/schemas/atom",
@@ -37,8 +34,6 @@ _ATOM_NS = {
 
 
 class ArxivClient:
-    """Client for fetching papers from arXiv API."""
-
     def __init__(self, config: ArxivClientConfig | None = None) -> None:
         self.config = config or ArxivClientConfig()
 
@@ -98,7 +93,6 @@ class ArxivClient:
         return all_entries, newest_published
 
     def _build_query_url(self, category: str, start: int) -> str:
-        """Build arXiv API query URL."""
         params = {
             "search_query": f"cat:{category}",
             "start": str(start),
@@ -109,7 +103,6 @@ class ArxivClient:
         return f"{self.config.API_URL}?{urllib.parse.urlencode(params)}"
 
     def _fetch_with_retry(self, url: str) -> bytes:
-        """Fetch URL with exponential backoff retry."""
         last_error: Exception | None = None
 
         for attempt in range(1, self.config.MAX_RETRIES + 1):
@@ -149,7 +142,6 @@ class ArxivClient:
         ) from last_error
 
     def _parse_feed(self, xml_bytes: bytes) -> list[ParsedEntry]:
-        """Parse Atom feed XML into ParsedEntry objects."""
         root = ET.fromstring(xml_bytes)
         entries: list[ParsedEntry] = []
 
@@ -161,34 +153,28 @@ class ArxivClient:
         return entries
 
     def _parse_entry(self, entry_el: ET.Element) -> ParsedEntry | None:
-        """Parse single Atom entry element."""
         entry_id_url = _text(entry_el.find("atom:id", _ATOM_NS))
         if not entry_id_url:
             return None
 
         arxiv_id = _parse_arxiv_id(entry_id_url)
 
-        # Parse dates
         published = _parse_datetime(_text(entry_el.find("atom:published", _ATOM_NS)))
         updated = _parse_datetime(_text(entry_el.find("atom:updated", _ATOM_NS)))
 
-        # Parse metadata
         title = _text(entry_el.find("atom:title", _ATOM_NS))
         abstract = _text(entry_el.find("atom:summary", _ATOM_NS))
 
-        # Parse authors
         authors = [
             _text(a) for a in entry_el.findall("atom:author/atom:name", _ATOM_NS) if _text(a)
         ]
 
-        # Parse categories
         categories = [
             c.attrib["term"]
             for c in entry_el.findall("atom:category", _ATOM_NS)
             if c.attrib.get("term")
         ]
 
-        # Primary category
         primary_el = entry_el.find("arxiv:primary_category", _ATOM_NS)
         primary_category = (
             primary_el.attrib.get("term")
@@ -196,11 +182,9 @@ class ArxivClient:
             else (categories[0] if categories else None)
         )
 
-        # Optional fields
         doi = _text(entry_el.find("arxiv:doi", _ATOM_NS)) or None
         journal_ref = _text(entry_el.find("arxiv:journal_ref", _ATOM_NS)) or None
 
-        # Parse version from alternate link
         latest_version = None
         for link in entry_el.findall("atom:link", _ATOM_NS):
             if link.attrib.get("rel") == "alternate":
@@ -246,12 +230,10 @@ class ArxivClient:
 
 
 def _text(element: ET.Element | None) -> str:
-    """Extract text content from XML element."""
     return (element.text or "").strip() if element is not None else ""
 
 
 def _parse_datetime(value: str) -> datetime:
-    """Parse ISO datetime string to UTC datetime."""
     if not value:
         return datetime.now(UTC)
 
@@ -267,7 +249,6 @@ def _parse_datetime(value: str) -> datetime:
 
 
 def _parse_arxiv_id(entry_id_url: str) -> str:
-    """Extract arXiv ID from entry URL, stripping version suffix."""
     tail = entry_id_url.rstrip("/").split("/")[-1]
     if "v" in tail and tail.split("v")[-1].isdigit():
         return tail.rsplit("v", 1)[0]
@@ -275,7 +256,6 @@ def _parse_arxiv_id(entry_id_url: str) -> str:
 
 
 def _parse_version(url: str) -> int | None:
-    """Extract version number from arXiv URL."""
     tail = url.rstrip("/").split("/")[-1]
     if "v" in tail and tail.split("v")[-1].isdigit():
         return int(tail.split("v")[-1])

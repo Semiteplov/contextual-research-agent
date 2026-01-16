@@ -15,8 +15,6 @@ logger = get_logger(__name__)
 
 
 class PapersMetadataRepository(BaseRepository):
-    """Repository for arXiv papers metadata operations."""
-
     TABLE_NAME = "arxiv_papers_metadata"
     DEFAULT_PAGE_SIZE = 2000
 
@@ -81,7 +79,6 @@ class PapersMetadataRepository(BaseRepository):
             raise QueryError(f"Failed to upsert papers: {e}") from e
 
     def count(self) -> int:
-        """Get total number of papers in the database."""
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM {self.TABLE_NAME}")
             result = cur.fetchone()
@@ -128,7 +125,6 @@ class PapersMetadataRepository(BaseRepository):
 
     @staticmethod
     def _paper_to_tuple(paper: PaperRow) -> tuple:
-        """Convert PaperRow to tuple for bulk insert."""
         return (
             paper.arxiv_id,
             paper.title,

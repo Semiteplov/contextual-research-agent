@@ -4,8 +4,6 @@ from datetime import datetime
 
 @dataclass(frozen=True, slots=True)
 class ParsedEntry:
-    """Parsed entry from arXiv Atom feed."""
-
     arxiv_id: str
     title: str
     abstract: str

@@ -81,7 +81,6 @@ def get_connection_context(
 def get_cursor(
     conn: PGConnection,
 ) -> Generator["PGCursor", None, None]:
-    """Context manager for database cursor."""
     cursor = conn.cursor()
     try:
         yield cursor

@@ -32,7 +32,6 @@ class PostgresSettings(BaseSettings):
 
     @property
     def url(self) -> str:
-        """Sync SQLAlchemy connection URL (psycopg2)."""
         return (
             f"postgresql+psycopg2://{self.user}:{self.password.get_secret_value()}"
             f"@{self.host}:{self.port}/{self.db}"
@@ -40,7 +39,6 @@ class PostgresSettings(BaseSettings):
 
     @property
     def async_url(self) -> str:
-        """Async SQLAlchemy connection URL (asyncpg)."""
         return (
             f"postgresql+asyncpg://{self.user}:{self.password.get_secret_value()}"
             f"@{self.host}:{self.port}/{self.db}"

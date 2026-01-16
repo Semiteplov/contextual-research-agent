@@ -15,7 +15,6 @@ def ingest_arxiv_metadata(
     metadata_path: str = DEFAULT_METADATA_PATH,
     batch_size: int = DB_BATCH_SIZE,
 ) -> None:
-    """Ingest arXiv metadata from Kaggle JSONL dump into PostgreSQL."""
     path = Path(metadata_path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Metadata file not found: {path}")
@@ -37,7 +36,6 @@ def _process_jsonl(
     path: Path,
     batch_size: int,
 ) -> tuple[int, int]:
-    """Process JSONL file: filter ML papers and upsert in batches."""
     total = 0
     kept = 0
     buffer: list[PaperRow] = []
@@ -62,6 +60,5 @@ def _process_jsonl(
 
 
 def _flush_batch(repo: PapersMetadataRepository, buffer: list[PaperRow]) -> None:
-    """Upsert batch to database."""
     count = repo.upsert(buffer)
     logger.info("Upserted batch: %d rows", count)
