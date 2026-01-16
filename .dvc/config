@@ -4,3 +4,4 @@
     url = s3://rag-storage/dvc
     endpointurl = http://localhost:9000
     use_ssl = false
+    profile = minio
