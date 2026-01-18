@@ -4,6 +4,7 @@ from contextual_research_agent.cli.arxiv import download_arxiv_papers, ingest_ar
 from contextual_research_agent.cli.datasets import (
     create_dataset,
     download_dataset,
+    download_sources,
     export_dataset_config,
     list_datasets,
     resume_download,
@@ -29,5 +30,6 @@ def main() -> None:
             "download-dataset": download_dataset,
             "export-dataset": export_dataset_config,
             "resume-download": resume_download,
+            "download-sources": download_sources,
         }
     )

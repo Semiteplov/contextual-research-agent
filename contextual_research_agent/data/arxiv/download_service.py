@@ -21,6 +21,16 @@ class DownloadState:
     skipped: int = 0
     failed: int = 0
 
+    @property
+    def processed(self) -> int:
+        return self.downloaded + self.skipped + self.failed
+
+    @property
+    def progress_pct(self) -> float:
+        if self.total == 0:
+            return 0.0
+        return self.processed / self.total * 100
+
 
 class PaperDownloadService:
     S3_PREFIX = "arxiv/papers"
@@ -53,7 +63,7 @@ class PaperDownloadService:
                 storage_path = self._s3_client.upload_bytes(
                     downloaded.content,
                     s3_key,
-                    content_type=self._get_content_type(file_type),
+                    content_type=downloaded.content_type,
                 )
 
                 repo.insert(
@@ -62,6 +72,9 @@ class PaperDownloadService:
                     file_type=file_type,
                     file_size_bytes=downloaded.size_bytes,
                     checksum_sha256=downloaded.checksum_sha256,
+                    source_format=downloaded.source_format.value
+                    if downloaded.source_format
+                    else None,
                 )
 
                 logger.info(
@@ -125,9 +138,3 @@ class PaperDownloadService:
         extension = "pdf" if downloaded.file_type == FileType.PDF else "tar.gz"
 
         return f"{self.S3_PREFIX}/{downloaded.file_type.value}/{arxiv_id}.{extension}"
-
-    @staticmethod
-    def _get_content_type(file_type: FileType) -> str:
-        if file_type == FileType.PDF:
-            return "application/pdf"
-        return "application/gzip"

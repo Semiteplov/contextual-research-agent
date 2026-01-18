@@ -3,6 +3,7 @@ from pathlib import Path
 import requests
 
 from contextual_research_agent.common.logging import get_logger
+from contextual_research_agent.data.arxiv.downloader import FileType
 from contextual_research_agent.db.connection import get_connection_context
 from contextual_research_agent.db.repositories.datasets import DatasetsRepository
 from contextual_research_agent.services.dataset_service import DatasetService
@@ -246,6 +247,33 @@ def resume_download(
     stats = service.resume_download(name, config_output_dir=config_dir)
 
     print("\nResume complete:")
+    print(f"  Downloaded: {stats.downloaded}")
+    print(f"  Skipped:    {stats.skipped}")
+    print(f"  Failed:     {stats.failed}")
+
+
+def download_sources(
+    name: str,
+    config_dir: str = "configs/datasets",
+) -> None:
+    """
+    Download source files (LaTeX) for a dataset.
+
+    Args:
+        name: Dataset name.
+        config_dir: Directory for config YAML files.
+
+    Example:
+        python main.py download-sources --name="mvp-v1"
+    """
+    service = DatasetService()
+
+    logger.info("Downloading source files for dataset '%s'", name)
+    stats = service.download_dataset_files(name, file_type=FileType.SRC)
+
+    service._export_config(name, config_dir)
+
+    print("\nSource download complete:")
     print(f"  Downloaded: {stats.downloaded}")
     print(f"  Skipped:    {stats.skipped}")
     print(f"  Failed:     {stats.failed}")

@@ -317,18 +317,22 @@ class DatasetService:
 
         return len(orphaned_ids)
 
-    def _download_papers(self, arxiv_ids: list[str]) -> DownloadProgress:
+    def _download_papers(
+        self,
+        arxiv_ids: list[str],
+        file_type: FileType = FileType.PDF,
+    ) -> DownloadProgress:
         progress = DownloadProgress(total=len(arxiv_ids))
 
         for arxiv_id in arxiv_ids:
             try:
-                downloaded = self._downloader.download(arxiv_id, FileType.PDF)
+                downloaded = self._downloader.download(arxiv_id, file_type)
 
                 s3_key = f"{S3_PAPERS_PREFIX}/pdf/{downloaded.arxiv_id}.pdf"
                 storage_path = self._s3_client.upload_bytes(
                     downloaded.content,
                     s3_key,
-                    content_type="application/pdf",
+                    content_type=downloaded.content_type,
                 )
 
                 with get_connection_context() as conn:
@@ -339,6 +343,9 @@ class DatasetService:
                         file_type=FileType.PDF,
                         file_size_bytes=downloaded.size_bytes,
                         checksum_sha256=downloaded.checksum_sha256,
+                        source_format=downloaded.source_format.value
+                        if downloaded.source_format
+                        else None,
                     )
 
                 progress.downloaded += 1
@@ -385,3 +392,29 @@ class DatasetService:
         logger.info("Downloading %d PDFs...", len(arxiv_ids))
 
         return self._download_papers(arxiv_ids)
+
+    def download_dataset_files(
+        self,
+        dataset_name: str,
+        file_type: FileType = FileType.PDF,
+    ) -> DownloadProgress:
+        with get_connection_context() as conn:
+            datasets_repo = DatasetsRepository(conn)
+
+            dataset = datasets_repo.get_by_name(dataset_name)
+            if dataset is None:
+                raise ValueError(f"Dataset '{dataset_name}' not found")
+
+            all_ids = datasets_repo.get_arxiv_ids(dataset_name)
+
+            papers_repo = PaperFilesRepository(conn)
+            existing = papers_repo.bulk_check_exists(all_ids, file_type)
+            arxiv_ids = [aid for aid in all_ids if aid not in existing]
+
+        if not arxiv_ids:
+            logger.info("All %s files already downloaded", file_type.value)
+            return DownloadProgress()
+
+        logger.info("Downloading %d %s files...", len(arxiv_ids), file_type.value)
+
+        return self._download_papers(arxiv_ids, file_type)

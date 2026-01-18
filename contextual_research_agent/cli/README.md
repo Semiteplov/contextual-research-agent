@@ -35,6 +35,12 @@ python main.py show-dataset --name="mvp-v1"
 python main.py download-dataset --name="mvp-v1"
 ```
 
+#### Скачать source статей
+
+```bash
+python main.py download-sources --name="mvp-v1"
+```
+
 #### Докачать недостающие статьи
 
 ```bash

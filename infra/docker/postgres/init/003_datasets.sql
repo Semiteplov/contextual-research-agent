@@ -29,3 +29,6 @@ CREATE INDEX idx_dataset_papers_split ON dataset_papers(dataset_id, split);
 
 ALTER TABLE arxiv_papers
 ADD CONSTRAINT uq_arxiv_papers_id_type UNIQUE (arxiv_id, file_type);
+
+ALTER TABLE arxiv_papers
+ADD COLUMN IF NOT EXISTS source_format VARCHAR(10);
