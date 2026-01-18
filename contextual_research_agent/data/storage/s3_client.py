@@ -107,6 +107,26 @@ class S3Client:
             logger.exception("Failed to delete from S3: %s", key)
             raise S3ClientError(f"Delete failed: {e}") from e
 
+    def list_objects(self, prefix: str) -> list[str]:
+        keys = []
+        try:
+            paginator = self._client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    keys.append(obj["Key"])
+        except ClientError as e:
+            logger.exception("Failed to list objects: %s", prefix)
+            raise S3ClientError(f"List failed: {e}") from e
+
+        return keys
+
+    def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+
 
 def compute_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()

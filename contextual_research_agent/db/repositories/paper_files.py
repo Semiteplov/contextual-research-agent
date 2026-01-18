@@ -47,6 +47,11 @@ class PaperFilesRepository(BaseRepository):
                     INSERT INTO arxiv_papers
                         (arxiv_id, storage_path, file_type, file_size_bytes, checksum_sha256)
                     VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (arxiv_id, file_type) DO UPDATE SET
+                        storage_path = EXCLUDED.storage_path,
+                        file_size_bytes = EXCLUDED.file_size_bytes,
+                        checksum_sha256 = EXCLUDED.checksum_sha256,
+                        downloaded_at = NOW()
                     RETURNING id
                     """,
                     (arxiv_id, storage_path, file_type.value, file_size_bytes, checksum_sha256),
@@ -104,6 +109,24 @@ class PaperFilesRepository(BaseRepository):
             cur.execute(query, params)
             return cur.fetchone() is not None
 
+    def bulk_check_exists(
+        self,
+        arxiv_ids: list[str],
+        file_type: FileType,
+    ) -> set[str]:
+        if not arxiv_ids:
+            return set()
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT arxiv_id FROM arxiv_papers
+                WHERE arxiv_id = ANY(%s) AND file_type = %s
+                """,
+                (arxiv_ids, file_type.value),
+            )
+            return {row[0] for row in cur.fetchall()}
+
     def get_missing_arxiv_ids(
         self,
         file_type: FileType,
@@ -124,6 +147,19 @@ class PaperFilesRepository(BaseRepository):
             )
             return [row[0] for row in cur.fetchall()]
 
+    def get_storage_path(
+        self,
+        arxiv_id: str,
+        file_type: FileType = FileType.PDF,
+    ) -> str | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT storage_path FROM arxiv_papers WHERE arxiv_id = %s AND file_type = %s",
+                (arxiv_id, file_type.value),
+            )
+            result = cur.fetchone()
+            return result[0] if result else None
+
     def count(self, file_type: FileType | None = None) -> int:
         query = "SELECT COUNT(*) FROM arxiv_papers"
         params: list = []
@@ -136,3 +172,75 @@ class PaperFilesRepository(BaseRepository):
             cur.execute(query, params)
             result = cur.fetchone()
             return result[0] if result else 0
+
+    def get_papers_for_download(
+        self,
+        limit_per_category: int = 200,
+        categories: list[str] | None = None,
+        min_date: str = "2022-01-01",
+        keywords: list[str] | None = None,
+        exclude_downloaded: bool = True,
+    ) -> list[str]:
+        categories = categories or ["cs.CL", "cs.LG", "cs.AI", "cs.CV", "stat.ML"]
+
+        keyword_filter = ""
+        if keywords:
+            conditions = []
+            for kw in keywords:
+                escaped = kw.replace("'", "''").lower()
+                conditions.append(f"LOWER(m.title) LIKE '%{escaped}%'")
+                conditions.append(f"LOWER(m.abstract) LIKE '%{escaped}%'")
+            keyword_filter = f"AND ({' OR '.join(conditions)})"
+
+        exclude_filter = ""
+        if exclude_downloaded:
+            exclude_filter = "AND p.id IS NULL"
+
+        query = f"""
+            WITH ranked AS (
+                SELECT
+                    m.arxiv_id,
+                    m.primary_category,
+                    m.update_date,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY m.primary_category
+                        ORDER BY m.update_date DESC
+                    ) as rn
+                FROM arxiv_papers_metadata m
+                LEFT JOIN arxiv_papers p
+                    ON m.arxiv_id = p.arxiv_id AND p.file_type = 'pdf'
+                WHERE
+                    m.primary_category = ANY(%s)
+                    AND m.update_date >= %s
+                    AND m.abstract IS NOT NULL
+                    AND LENGTH(m.abstract) > 100
+                    {keyword_filter}
+                    {exclude_filter}
+            )
+            SELECT arxiv_id
+            FROM ranked
+            WHERE rn <= %s
+            ORDER BY primary_category, update_date DESC
+        """
+
+        with self._conn.cursor() as cur:
+            cur.execute(query, (categories, min_date, limit_per_category))
+            return [row[0] for row in cur.fetchall()]
+
+    def delete_by_arxiv_ids(
+        self,
+        arxiv_ids: list[str],
+        file_type: FileType = FileType.PDF,
+    ) -> int:
+        if not arxiv_ids:
+            return 0
+
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM arxiv_papers
+                WHERE arxiv_id = ANY(%s) AND file_type = %s
+                """,
+                (arxiv_ids, file_type.value),
+            )
+            return cur.rowcount

@@ -9,6 +9,7 @@ from contextual_research_agent.db.errors import (
     QueryError,
 )
 from contextual_research_agent.db.repositories import (
+    DatasetsRepository,
     PaperFilesRepository,
     PapersMetadataRepository,
     SyncStateRepository,
@@ -17,6 +18,7 @@ from contextual_research_agent.db.repositories import (
 __all__ = [
     "DBConnectionError",
     "DBError",
+    "DatasetsRepository",
     "IntegrityError",
     "PaperFilesRepository",
     "PapersMetadataRepository",

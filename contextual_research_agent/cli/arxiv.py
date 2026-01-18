@@ -51,7 +51,7 @@ def ingest_arxiv_metadata(
     logger.info("Categories filter: %s", sorted(ML_CATEGORIES))
     logger.info("Batch size: %d", batch_size)
 
-    with get_connection_context(db_name="arxiv") as conn:
+    with get_connection_context() as conn:
         repo = PapersMetadataRepository(conn)
         total, kept = _process_jsonl(repo, path, batch_size)
 

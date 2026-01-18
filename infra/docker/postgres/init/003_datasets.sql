@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS datasets (
     test_ratio REAL NOT NULL DEFAULT 0.1,
     random_seed INT NOT NULL DEFAULT 42,
     total_papers INT NOT NULL DEFAULT 0,
-    downloaded_papers INT NOT NULL DEFAULT 0,
-    s3_prefix TEXT,
     purpose VARCHAR(50) NOT NULL DEFAULT 'training',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -21,8 +19,6 @@ CREATE TABLE IF NOT EXISTS dataset_papers (
     dataset_id INT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
     arxiv_id VARCHAR(20) NOT NULL REFERENCES arxiv_papers_metadata(arxiv_id),
     split VARCHAR(20) NOT NULL DEFAULT 'train',
-    is_downloaded BOOLEAN DEFAULT FALSE,
-    storage_path TEXT,
     added_at TIMESTAMPTZ DEFAULT NOW(),
 
     PRIMARY KEY (dataset_id, arxiv_id)
@@ -30,4 +26,6 @@ CREATE TABLE IF NOT EXISTS dataset_papers (
 
 CREATE INDEX idx_dataset_papers_arxiv ON dataset_papers(arxiv_id);
 CREATE INDEX idx_dataset_papers_split ON dataset_papers(dataset_id, split);
-CREATE INDEX idx_dataset_papers_downloaded ON dataset_papers(dataset_id, is_downloaded);
+
+ALTER TABLE arxiv_papers
+ADD CONSTRAINT uq_arxiv_papers_id_type UNIQUE (arxiv_id, file_type);
