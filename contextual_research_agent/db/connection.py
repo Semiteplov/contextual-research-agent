@@ -64,7 +64,7 @@ def get_connection_context(
             repo = PapersRepository(conn)
             repo.upsert(papers)
     """
-    conn = get_connection(db_name=db_name, autocommit=autocommit)
+    conn = get_connection(db_name=db_name or "arxiv", autocommit=autocommit)
     try:
         yield conn
         if not autocommit:
