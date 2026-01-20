@@ -1,3 +1,4 @@
+import gzip
 import random
 import time
 import urllib.error
@@ -17,6 +18,12 @@ class FileType(Enum):
     SRC = "source"
 
 
+class SourceFormat(Enum):
+    GZ = "gz"
+    TAR_GZ = "tar.gz"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class DownloadedFile:
     arxiv_id: str
@@ -24,6 +31,23 @@ class DownloadedFile:
     content: bytes
     size_bytes: int
     checksum_sha256: str
+    source_format: SourceFormat | None = None
+
+    @property
+    def extension(self) -> str:
+        if self.file_type == FileType.PDF:
+            return "pdf"
+        if self.source_format == SourceFormat.TAR_GZ:
+            return "tar.gz"
+        if self.source_format == SourceFormat.GZ:
+            return "gz"
+        return "gz"
+
+    @property
+    def content_type(self) -> str:
+        if self.file_type == FileType.PDF:
+            return "application/pdf"
+        return "application/gzip"
 
 
 class ArxivDownloadError(Exception):
@@ -38,7 +62,7 @@ class ArxivDownloaderConfig:
     BACKOFF_MAX_SECONDS: float = 60.0
 
     PDF_URL_TEMPLATE: str = "https://arxiv.org/pdf/{arxiv_id}.pdf"
-    SOURCE_URL_TEMPLATE: str = "https://arxiv.org/src/{arxiv_id}"
+    SOURCE_URL_TEMPLATE: str = "https://arxiv.org/e-print/{arxiv_id}"
 
 
 class ArxivDownloader:
@@ -56,11 +80,13 @@ class ArxivDownloader:
             content=content,
             size_bytes=len(content),
             checksum_sha256=compute_sha256(content),
+            source_format=None,
         )
 
     def download_source(self, arxiv_id: str) -> DownloadedFile:
         url = self.config.SOURCE_URL_TEMPLATE.format(arxiv_id=arxiv_id)
         content = self._download_with_retry(url, arxiv_id)
+        source_format = self._detect_source_format(content)
 
         return DownloadedFile(
             arxiv_id=arxiv_id,
@@ -68,6 +94,7 @@ class ArxivDownloader:
             content=content,
             size_bytes=len(content),
             checksum_sha256=compute_sha256(content),
+            source_format=source_format,
         )
 
     def download(
@@ -146,3 +173,19 @@ class ArxivDownloader:
             time.sleep(sleep_time)
 
         self._last_request_time = time.time()
+
+    def _detect_source_format(self, content: bytes) -> SourceFormat:
+        if len(content) < 2:  # noqa: PLR2004
+            return SourceFormat.UNKNOWN
+
+        if content[:2] != b"\x1f\x8b":
+            return SourceFormat.UNKNOWN
+
+        try:
+            decompressed = gzip.decompress(content)
+
+            if len(decompressed) > 262 and decompressed[257:262] == b"ustar":  # noqa: PLR2004
+                return SourceFormat.TAR_GZ
+            return SourceFormat.GZ
+        except Exception:
+            return SourceFormat.UNKNOWN

@@ -32,29 +32,39 @@ class PaperFilesRepository(BaseRepository):
     def __init__(self, conn: "PGConnection") -> None:
         super().__init__(conn)
 
-    def insert(
+    def insert(  # noqa: PLR0913
         self,
         arxiv_id: str,
         storage_path: str,
         file_type: FileType,
         file_size_bytes: int | None = None,
         checksum_sha256: str | None = None,
+        source_format: str | None = None,
     ) -> int:
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO arxiv_papers
-                        (arxiv_id, storage_path, file_type, file_size_bytes, checksum_sha256)
-                    VALUES (%s, %s, %s, %s, %s)
+                        (arxiv_id, storage_path, file_type, file_size_bytes,
+                        checksum_sha256, source_format)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (arxiv_id, file_type) DO UPDATE SET
                         storage_path = EXCLUDED.storage_path,
                         file_size_bytes = EXCLUDED.file_size_bytes,
                         checksum_sha256 = EXCLUDED.checksum_sha256,
+                        source_format = EXCLUDED.source_format,
                         downloaded_at = NOW()
                     RETURNING id
                     """,
-                    (arxiv_id, storage_path, file_type.value, file_size_bytes, checksum_sha256),
+                    (
+                        arxiv_id,
+                        storage_path,
+                        file_type.value,
+                        file_size_bytes,
+                        checksum_sha256,
+                        source_format,
+                    ),
                 )
                 result = cur.fetchone()
                 return result[0] if result else 0
