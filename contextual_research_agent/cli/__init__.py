@@ -10,6 +10,11 @@ from contextual_research_agent.cli.datasets import (
     resume_download,
     show_dataset,
 )
+from contextual_research_agent.cli.extraction import (
+    extract_texts,
+    extraction_stats,
+    show_extracted_text,
+)
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
 
@@ -31,5 +36,9 @@ def main() -> None:
             "export-dataset": export_dataset_config,
             "resume-download": resume_download,
             "download-sources": download_sources,
+            # Text extraction
+            "extract-texts": extract_texts,
+            "extraction-stats": extraction_stats,
+            "show-text": show_extracted_text,
         }
     )

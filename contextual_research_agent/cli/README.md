@@ -1,5 +1,7 @@
 ## Примеры использования cli commands для Датасетов:
 
+### Скачивание статей
+
 #### Создать датасет со скачиванием статей
 
 ```bash
@@ -35,7 +37,7 @@ python main.py show-dataset --name="mvp-v1"
 python main.py download-dataset --name="mvp-v1"
 ```
 
-#### Скачать source статей
+#### Скачать LaTeX статей
 
 ```bash
 python main.py download-sources --name="mvp-v1"
@@ -48,3 +50,29 @@ python main.py resume-download --name="mvp-v1" --verify-s3
 ```
 
 `--verify-s3` - проверяет есть ли статьи на s3, если нет, то докачивает их
+
+### Извлечение контента статей
+
+#### Извлечь текст из всех PDF в датасете
+
+```bash
+python main.py extract-texts --dataset="mvp-v1"
+```
+
+#### Извлечь только первые 100
+
+```bash
+python main.py extract-texts --dataset="mvp-v1" --limit=100
+```
+
+#### Посмотреть статистику
+
+```bash
+python main.py extraction-stats --dataset="mvp-v1"
+```
+
+#### Посмотреть извлечённый текст конкретной статьи
+
+```bash
+python main.py show-text --arxiv-id="2401.12345"
+```
