@@ -72,6 +72,16 @@ class MLflowSettings(BaseSettings):
     artifact_root: str | None = None
 
 
+class QdrantSettings(BaseSettings):
+    """Qdrant connection settings."""
+
+    model_config = _make_settings_config("QDRANT_")
+
+    host: str = "localhost"
+    port: int = 6333
+    collection_name: str = "documents"
+
+
 class AppSettings(BaseSettings):
     """Application settings."""
 
@@ -89,6 +99,10 @@ class AppSettings(BaseSettings):
     @cached_property
     def s3(self) -> S3Settings:
         return S3Settings()
+
+    @cached_property
+    def qdrant(self) -> QdrantSettings:
+        return QdrantSettings()
 
     @cached_property
     def mlflow(self) -> MLflowSettings:

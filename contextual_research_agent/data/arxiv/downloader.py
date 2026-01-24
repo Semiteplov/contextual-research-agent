@@ -3,7 +3,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from ssl import SSLError
 
 from contextual_research_agent.common.logging import get_logger
@@ -12,7 +12,7 @@ from contextual_research_agent.data.storage.s3_client import compute_sha256
 logger = get_logger(__name__)
 
 
-class FileType(Enum):
+class FileType(StrEnum):
     PDF = "pdf"
     SRC = "source"
 

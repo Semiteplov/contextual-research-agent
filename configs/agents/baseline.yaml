@@ -1,0 +1,47 @@
+name: baseline-v1
+description: "Baseline RAG agent with Summarization and QA modes"
+version: 1
+
+embedding:
+  model: "Qwen/Qwen3-Embedding-4B"
+  device: "cuda"
+  batch_size: 8
+  normalize: true
+  query_instruction: null
+  passage_instruction: null
+
+parser:
+  tokenizer_model: "Qwen/Qwen3-Embedding-4B"
+  max_tokens: 512
+  merge_peers: true
+  include_section_context: true
+  do_ocr: false
+  do_table_structure: true
+  num_threads: 4
+
+vector_store:
+  collection_name: "documents"
+  distance: "cosine"
+  on_disk: false
+
+retrieval:
+  default_top_k: 10
+  score_threshold: null
+
+llm:
+  provider: "ollama"
+  model: "qwen3:8b"
+  host: "http://localhost:11434"
+  temperature: 0.0
+  max_tokens: 2048
+
+modes:
+  available:
+    - summarize
+    - qa
+  
+  default: qa
+
+storage:
+  bucket: "rag-storage"
+  prefix: "arxiv/papers"
