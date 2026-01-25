@@ -79,7 +79,6 @@ class QdrantSettings(BaseSettings):
 
     host: str = "localhost"
     port: int = 6333
-    collection_name: str = "documents"
 
 
 class AppSettings(BaseSettings):

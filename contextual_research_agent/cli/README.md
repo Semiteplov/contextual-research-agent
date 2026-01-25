@@ -42,3 +42,26 @@ python main.py resume-download --name="mvp-v1" --verify-s3
 ```
 
 `--verify-s3` - проверяет есть ли статьи на s3, если нет, то докачивает их
+
+
+## Команды для агента
+
+#### Суммаризация скачанной статьи
+```bash
+python main.py summarize 1603.03788_9878b2e9db4cb82d --top-k 5
+```
+
+#### QA
+```bash
+python main.py query "What is a transformer in LLM?"
+```
+
+#### Чат
+```bash
+python main.py chat
+```
+
+#### Статистика
+```bash
+python stats
+```
