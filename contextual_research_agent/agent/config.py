@@ -70,6 +70,26 @@ class StorageConfig:
 
 
 @dataclass
+class MLflowConfig:
+    enabled: bool = False
+    tracking_uri: str = "http://100.121.65.75:5050/"
+    experiment_name: str = "research-assistant"
+    artifact_location: str | None = None
+    autolog_enabled: bool = True
+    log_inputs_outputs: bool = True
+    default_tags: list[str] | None = None
+
+
+@dataclass
+class TraceExportConfig:
+    enabled: bool = False
+    bucket: str = "rag-storage"
+    prefix: str = "traces"
+    compress: bool = True
+    batch_size: int = 100
+
+
+@dataclass
 class AgentConfig:
     name: str = "baseline-v1"
     description: str = ""
@@ -82,6 +102,8 @@ class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     modes: ModesConfig = field(default_factory=ModesConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    mlflow: MLflowConfig = field(default_factory=MLflowConfig)
+    trace_export: TraceExportConfig = field(default_factory=TraceExportConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> AgentConfig:
@@ -109,6 +131,8 @@ class AgentConfig:
             llm=_parse_llm(data.get("llm", {})),
             modes=_parse_modes(data.get("modes", {})),
             storage=_parse_storage(data.get("storage", {})),
+            mlflow=_parse_mlflow(data.get("mlflow", {})),
+            trace_export=_parse_trace_export(data.get("trace_export", {})),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,6 +147,21 @@ class AgentConfig:
             "llm": self.llm.__dict__,
             "modes": {"available": self.modes.available, "default": self.modes.default},
             "storage": self.storage.__dict__,
+            "mlflow": {
+                "enabled": self.mlflow.enabled,
+                "tracking_uri": self.mlflow.tracking_uri,
+                "experiment_name": self.mlflow.experiment_name,
+                "artifact_location": self.mlflow.artifact_location,
+                "autolog_enabled": self.mlflow.autolog_enabled,
+                "log_inputs_outputs": self.mlflow.log_inputs_outputs,
+                "default_tags": self.mlflow.default_tags,
+            },
+            "trace_export": {
+                "enabled": self.trace_export.enabled,
+                "bucket": self.trace_export.bucket,
+                "prefix": self.trace_export.prefix,
+                "compress": self.trace_export.compress,
+            },
         }
 
 
@@ -185,6 +224,28 @@ def _parse_storage(data: dict) -> StorageConfig:
     return StorageConfig(
         bucket=data.get("bucket", "rag-storage"),
         prefix=data.get("prefix", "arxiv/papers"),
+    )
+
+
+def _parse_mlflow(data: dict) -> MLflowConfig:
+    return MLflowConfig(
+        enabled=data.get("enabled", False),
+        tracking_uri=data.get("tracking_uri", "mlruns"),
+        experiment_name=data.get("experiment_name", "research-assistant"),
+        artifact_location=data.get("artifact_location"),
+        autolog_enabled=data.get("autolog_enabled", True),
+        log_inputs_outputs=data.get("log_inputs_outputs", True),
+        default_tags=data.get("default_tags"),
+    )
+
+
+def _parse_trace_export(data: dict) -> TraceExportConfig:
+    return TraceExportConfig(
+        enabled=data.get("enabled", False),
+        bucket=data.get("bucket", "rag-storage"),
+        prefix=data.get("prefix", "traces"),
+        compress=data.get("compress", True),
+        batch_size=data.get("batch_size", 100),
     )
 
 

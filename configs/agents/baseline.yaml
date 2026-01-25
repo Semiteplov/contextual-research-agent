@@ -3,7 +3,7 @@ description: "Baseline RAG agent with Summarization and QA modes"
 version: 1
 
 embedding:
-  model: "Qwen/Qwen3-Embedding-4B"
+  model: "Qwen/Qwen3-Embedding-0.6B"
   device: "cuda"
   batch_size: 8
   normalize: true
@@ -11,7 +11,7 @@ embedding:
   passage_instruction: null
 
 parser:
-  tokenizer_model: "Qwen/Qwen3-Embedding-4B"
+  tokenizer_model: "Qwen/Qwen3-Embedding-0.6B"
   max_tokens: 512
   merge_peers: true
   include_section_context: true
@@ -20,7 +20,7 @@ parser:
   num_threads: 4
 
 vector_store:
-  collection_name: "documents"
+  collection_name: "documents_qwen3_0_6b_1024"
   distance: "cosine"
   on_disk: false
 
@@ -39,9 +39,26 @@ modes:
   available:
     - summarize
     - qa
-  
+
   default: qa
 
 storage:
   bucket: "rag-storage"
   prefix: "arxiv/papers"
+
+mlflow:
+  enabled: false
+  tracking_uri: "http://100.121.65.75:5050/"
+  experiment_name: "research-assistant"
+  artifact_location: "s3://rag-storage/mlflow-artifacts"
+  autolog_enabled: true
+  log_inputs_outputs: true
+  default_tags:
+    - ${name}
+
+trace_export:
+  enabled: false
+  bucket: "rag-storage"
+  prefix: "traces"
+  compress: true
+  batch_size: 100

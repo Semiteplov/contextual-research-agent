@@ -52,12 +52,19 @@ class OllamaProvider(LLMProvider):
         self,
         model: str = "qwen3:8b",
         host: str = "http://localhost:11434",
-        timeout: float = 120.0,
+        timeout: float = 300.0,
     ):
         self._model = model
         self._host = host.rstrip("/")
         self._timeout = timeout
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=timeout,
+                write=30.0,
+                pool=10.0,
+            )
+        )
 
         logger.info(f"OllamaProvider initialized: model={model}, host={host}")
 

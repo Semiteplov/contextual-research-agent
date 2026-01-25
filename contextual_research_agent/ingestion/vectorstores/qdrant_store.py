@@ -17,13 +17,14 @@ logger = logging.get_logger(__name__)
 class QdrantStore:
     def __init__(
         self,
+        collection_name: str = "documents",
         embedding_dim: int = 1024,
         distance: str = "cosine",
         on_disk: bool = False,
     ):
         settings = get_settings()
 
-        self.collection_name = settings.qdrant.collection_name
+        self.collection_name = collection_name
         self.embedding_dim = embedding_dim
         self.distance = distance
         self._on_disk = on_disk
@@ -352,6 +353,11 @@ class QdrantStore:
 
 
 def create_qdrant_store(
-    embedding_dim: int = 1024, distance: str = "cosine", on_disk: bool = False
+    collection_name: str, embedding_dim: int = 1024, distance: str = "cosine", on_disk: bool = False
 ) -> QdrantStore:
-    return QdrantStore(embedding_dim=embedding_dim, distance=distance, on_disk=on_disk)
+    return QdrantStore(
+        collection_name=collection_name,
+        embedding_dim=embedding_dim,
+        distance=distance,
+        on_disk=on_disk,
+    )

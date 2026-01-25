@@ -1,5 +1,6 @@
 import fire
 
+from contextual_research_agent.cli.agent import chat, list_docs, query, retrieve, stats, summarize
 from contextual_research_agent.cli.arxiv import download_arxiv_papers, ingest_arxiv_metadata
 from contextual_research_agent.cli.datasets import (
     create_dataset,
@@ -9,6 +10,7 @@ from contextual_research_agent.cli.datasets import (
     resume_download,
     show_dataset,
 )
+from contextual_research_agent.cli.ingestion import ingest_file, ingest_files
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
 
@@ -29,5 +31,15 @@ def main() -> None:
             "download-dataset": download_dataset,
             "export-dataset": export_dataset_config,
             "resume-download": resume_download,
+            # Ingestion
+            "ingest-file": ingest_file,
+            "ingest_files": ingest_files,
+            # Agent commands
+            "query": query,
+            "summarize": summarize,
+            "retrieve": retrieve,
+            "chat": chat,
+            "stats": stats,
+            "list-docs": list_docs,
         }
     )
