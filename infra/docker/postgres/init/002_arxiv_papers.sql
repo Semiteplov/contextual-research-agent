@@ -1,3 +1,5 @@
+\connect arxiv
+
 CREATE TABLE IF NOT EXISTS arxiv_papers (
     id SERIAL PRIMARY KEY,
     arxiv_id VARCHAR(20) NOT NULL UNIQUE,

@@ -1,0 +1,277 @@
+# Ingestion Pipeline
+
+## Назначение
+
+Модуль `ingestion` реализует полный цикл преобразования научных PDF-статей в индексированные векторные представления для RAG. Pipeline принимает PDF-документ и выполняет последовательную цепочку: **парсинг → чанкинг → эмбеддинг → индексация**.
+
+Модуль спроектирован как **data pipeline**, отделённый от agent-уровня. Это позволяет:
+
+- запускать ingestion независимо от LLM/agent инфраструктуры;
+- проводить ablation studies по параметрам ingestion без изменения agent логики;
+- масштабировать ingestion горизонтально (batch, concurrent).
+
+### Архитектурное решение: почему не LangGraph
+
+Ingestion pipeline — линейная цепочка (parse → chunk → embed → index) без ветвлений, циклов и tool calls. LangGraph добавил бы overhead сериализации state, потерю типизации (`state.get("document")` → `Any`) и сложность compile/invoke без практической пользы. Pipeline реализован как typed async chain с explicit dataclass результатами на каждой стадии. LangGraph зарезервирован для agent orchestration, где нелинейный граф (multi-mode routing, evaluation loops) оправдывает графовую абстракцию.
+
+## Архитектура
+
+```
+PDF (S3)
+  │
+  ▼
+┌─────────────────────────────────────────────────────────────┐
+│  DoclingParser                                              │
+│  ┌───────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ PDF → Doc │ →  │ Структурное  │ →  │ HybridChunker    │  │
+│  │ Converter │    │ извлечение   │    │ (hierarchical    │  │
+│  │ (Docling) │    │ (title,      │    │  + merge_peers   │  │
+│  │           │    │  abstract,   │    │  + context)      │  │
+│  │           │    │  sections)   │    │                  │  │
+│  └───────────┘    └──────────────┘    └──────────────────┘  │
+│                                              │              │
+│  Serializers:                                │              │
+│  • MarkdownTableSerializer                   │              │
+│  • AnnotationPictureSerializer               │              │
+└──────────────────────────────────────────────┼──────────────┘
+                                               │
+                                    list[Chunk] + ChunkingMetrics
+                                               │
+                                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  HuggingFaceEmbedder                                        │
+│  • SentenceTransformers backend                             │
+│  • prompt_name / prefix routing по семейству модели         │
+│  • L2 нормализация                                          │
+└─────────────────────────────────────────────────────────────┘
+                                               │
+                                    list[list[float]] + EmbeddingMetrics
+                                               │
+                                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  QdrantStore                                                │
+│  • Детерминированные point ID (SHA-256 → UUID)              │
+│  • Payload indexes для фильтрации по типу, секции, документу│
+│  • Retry с exponential backoff                              │
+└─────────────────────────────────────────────────────────────┘
+                                               │
+                                    StoreOperationMetrics
+                                               │
+                                               ▼
+                                    IngestionResult
+                                    (IngestionMetrics: latency + chunking
+                                     + embedding + indexing)
+                                               │
+                                               ▼
+                                    MLflow (IngestionTracker)
+                                    + JSON report
+```
+
+## Структура модуля
+
+```
+ingestion/
+├── parsers/
+│   ├── base.py              # DocumentParser ABC
+│   ├── config.py            # DoclingParserConfig, ChunkType (без внутренних импортов)
+│   ├── metrics.py           # ChunkingMetrics, compute/aggregate
+│   ├── serializers.py       # ScientificSerializerProvider, AnnotationPictureSerializer
+│   └── docling.py           # DoclingParser, ParseResult, create_docling_parser
+├── embeddings/
+│   ├── base.py              # Embedder ABC
+│   └── hf_embedder.py       # HuggingFaceEmbedder, EmbeddingMetrics
+├── vectorstores/
+│   └── qdrant_store.py      # QdrantStore, StoreOperationMetrics, SearchMetrics
+├── domain/
+│   ├── entities.py          # Document, Chunk, RetrievedChunk, Citation, ChunkType
+│   └── types.py             # DocumentStatus enum
+├── pipeline.py              # IngestionPipeline, IngestionResult, BatchResult, StageLatency
+└── tracking.py              # IngestionTracker (MLflow интеграция)
+```
+
+## Компоненты
+
+### DoclingParser
+
+Парсер на основе IBM Docling. Выполняет две фазы:
+
+1. **Parse**: PDF → DoclingDocument (структурированное представление с labeled items: section headers, paragraphs, tables, figures). Метод возвращает `ParseResult`, содержащий сериализуемый `Document` и in-memory `DoclingDocument`. DoclingDocument **не** хранится в `Document.metadata` во избежание утечек памяти и проблем сериализации.
+
+2. **Extract chunks**: DoclingDocument → `list[Chunk]` + `ChunkingMetrics` через HybridChunker. Chunker комбинирует иерархическое разбиение (по секциям документа) с контролем длины в токенах embedding-модели.
+
+### HuggingFaceEmbedder
+
+Эмбеддинг-провайдер на SentenceTransformers. Поддерживает два механизма инструктирования:
+
+- **prompt_name**: для моделей с встроенными prompt-шаблонами (Qwen3-Embedding) — модель сама форматирует prompt;
+- **prefix**: конкатенация строки-инструкции (BGE, E5).
+
+Выбор механизма — автоматический по реестру `_MODEL_CONFIGS` с возможностью явного override. Пустые/whitespace тексты заменяются на placeholder `"[empty]"` для сохранения index alignment `chunks[i] ↔ embeddings[i]`.
+
+### QdrantStore
+
+Payload indexes по `document_id`, `chunk_type`, `section`, `is_fallback`, `is_degenerate` позволяют фильтрованный поиск. 
+
+### IngestionTracker
+
+MLflow интеграция. Логирует конфигурацию как params, метрики стадий как metrics, отчёты как artifacts. Поддерживает single и batch режимы.
+
+## Параметры, влияющие на качество
+
+### Параметры чанкинга
+
+| Параметр | CLI флаг | Default | Влияние |
+|---|---|---|---|
+| `max_tokens` | `--max-tokens` | 512 | Размер чанка в токенах. Больше → больше контекста, ниже precision при retrieval. Меньше → точнее retrieval, но возможна потеря контекста. |
+| `merge_peers` | `--no-merge-peers` | True | Объединение соседних чанков одного уровня иерархии. True → когерентные чанки (целые параграфы). False → гранулярные чанки (отдельные элементы). |
+| `include_context` | `--no-context` | True | Добавление иерархических заголовков секций в начало чанка. Улучшает retrieval для query вида "method in paper X", увеличивает overhead на 15–30% токенов. |
+| `filter_empty_chunks` | `--filter-empty` | False | Удаление вырожденных чанков (< min_chunk_tokens). False — сохраняет для анализа в метриках. True — убирает шум в production. |
+| `min_chunk_tokens` | `--min-chunk-tokens` | 20 | Порог вырожденности. Чанки ниже порога помечаются `is_degenerate=True`. |
+| `do_table_structure` | — | True | Распознавание структуры таблиц. Без этого таблицы сериализуются как плоский текст. Всегда True для научных статей. |
+| `do_ocr` | — | False | OCR для отсканированных страниц. Для arXiv PDF (цифровые) не нужен, замедляет в ~5x. |
+
+### Параметры сериализации
+
+| Параметр | Влияние |
+|---|---|
+| Table serializer (Markdown vs triplet) | Markdown сохраняет структуру строк/столбцов, triplet компактнее, но теряет layout. Для LLM Markdown предпочтительнее. |
+| Picture serializer (annotation vs placeholder) | Annotation включает описание image (тип, caption) в текст чанка. Placeholder — только метку `[Figure]`. Annotation улучшает retrieval по визуальному контенту (архитектуры, графики). |
+
+### Параметры эмбеддинга
+
+| Параметр | CLI флаг | Default | Влияние |
+|---|---|---|---|
+| `embedding_model` | `--embedding-model` | BAAI/bge-m3 | Определяет качество семантического представления. Токенизатор модели должен совпадать с токенизатором чанкинга. |
+| `normalize` | — | True | L2-нормализация. Необходима для cosine similarity. |
+| `batch_size` | `--batch-size` | 32 | Batch size для GPU inference. Влияет на throughput, не на качество. |
+
+### Параметры индексации
+
+| Параметр | CLI флаг | Default | Влияние |
+|---|---|---|---|
+| `distance` | `--distance` | cosine | Метрика расстояния. Cosine — стандарт для нормализованных эмбеддингов. Dot product — если модель не нормализует. |
+| `on_disk` | `--on-disk` | False | Хранение векторов на диске. Экономит RAM, замедляет поиск. |
+| `collection` | `--collection` | documents | Имя Qdrant collection. Для ablation — уникальное имя на каждую конфигурацию. |
+
+## CLI-интерфейс
+
+### Одиночный файл
+
+```bash
+python main.py ingest-file <s3_path> [options]
+```
+
+Полный список опций:
+
+```bash
+python main.py ingest-file s3://rag-storage/arxiv/papers/2401.12345.pdf \
+    --embedding-model=BAAI/bge-m3 \
+    --max-tokens=512 \
+    --collection=documents \
+    --distance=cosine \
+    --batch-size=32 \
+    --no-merge-peers \     # отключить merge
+    --no-context \         # отключить section headings в чанках
+    --filter-empty \       # удалять вырожденные чанки
+    --min-chunk-tokens=20 \
+    --device=cuda \
+    --no-tracking          # отключить MLflow
+```
+
+### Batch по датасету
+
+```bash
+python main.py ingest-dataset <name> [options]
+```
+
+Дополнительные опции для batch:
+
+```bash
+python main.py ingest-dataset baseline-v1 \
+    --split=train \        # только train split
+    --limit=10 \           # первые 10 файлов (для тестирования)
+    --max-concurrent=1 \   # параллелизм (1=sequential, safe для GPU)
+    --continue-on-error    # не останавливаться при ошибках
+```
+
+### Статус и retry
+
+```bash
+# Проверить прогресс ingestion
+python main.py ingest-status baseline-v1 --collection=documents
+
+# Повторить упавшие из предыдущего запуска
+python main.py reingest-failed baseline-v1
+
+# Retry с другими параметрами
+python main.py reingest-failed baseline-v1 --max-tokens=256 --collection=exp_256
+```
+
+## Сбор метрик
+
+Метрики собираются на каждой стадии и агрегируются в `IngestionMetrics`:
+
+```
+IngestionResult
+└── metrics: IngestionMetrics
+    ├── latency: StageLatency
+    │   ├── parse_ms, chunk_ms, embed_ms, index_ms, total_ms
+    │   └── (pipeline собирает сам)
+    ├── chunking: ChunkingMetrics
+    │   ├── Distributional: mean/median/std/p5/p95 token lengths
+    │   ├── Quality: empty_chunk_count, oversized_chunk_count
+    │   ├── Type distribution: text/table/figure/code/equation
+    │   ├── Structural: section_coverage_ratio, context_overhead
+    │   └── (из parser.extract_chunks)
+    ├── embedding: EmbeddingMetrics
+    │   ├── duration_ms, throughput_texts_per_sec
+    │   ├── empty_text_count, mean_text_length
+    │   └── (из embedder._encode)
+    └── indexing: StoreOperationMetrics
+        ├── duration_ms, num_items, success
+        └── (из store.add_chunks)
+```
+
+Corpus-level агрегация через `aggregate_corpus_metrics()`:
+
+```
+BatchResult → per-document ChunkingMetrics[] → aggregate:
+  corpus_mean_tokens, corpus_std_tokens, corpus_p5, corpus_p95,
+  total_empty_chunks, total_oversized_chunks, empty_rate, oversized_rate,
+  fallback_rate, mean_section_coverage, mean_context_overhead
+```
+
+## Отчёты
+
+### JSON reports
+
+Каждый ingestion run сохраняет JSON report:
+
+```
+reports/
+├── ingestion/
+│   └── <document_id>.json       # single file reports
+├── ingestion_baseline-v1.json   # batch report
+├── ingestion_baseline-v1_train.json  # batch по split
+└── ingestion_baseline-v1_retry.json  # retry report
+```
+
+Batch report содержит полный `IngestionResult.to_dict()` для каждого документа, включая все метрики. Используется командой `reingest-failed` для определения упавших файлов.
+
+### MLflow artifacts
+
+| Artifact | Содержание |
+|---|---|
+| `batch_report.json` | Полный отчёт (дублирует JSON report) |
+| `per_document_metrics.csv` | Таблица: document_id, chunk_count, latency per stage, chunking quality |
+| `result.json` | Для single file runs |
+
+## Воспроизводимость
+
+Полная воспроизводимость эксперимента обеспечивается фиксацией:
+
+1. **Dataset config** (YAML): categories, date range, random seed, split ratios → определяет набор документов.
+2. **Ingestion params** (MLflow params): embedding_model, max_tokens, merge_peers, include_context, distance → определяет содержимое Qdrant collection.
+3. **Pipeline metrics** (MLflow metrics + JSON report): полная диагностика каждого документа.
+
+Комбинация dataset config + ingestion params однозначно определяет содержимое Qdrant collection и может быть воспроизведена повторным запуском с теми же флагами.

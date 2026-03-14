@@ -1,0 +1,29 @@
+name: baseline-v1
+description: 'Dataset: baseline-v1'
+version: 1
+purpose: training
+created_at: '2026-03-11T17:55:50.164274+00:00'
+selection_criteria:
+  categories:
+  - cs.CL
+  - cs.LG
+  - cs.AI
+  - cs.CV
+  - stat.ML
+  min_date: '2025-01-01'
+  keywords: null
+  total_requested: 500
+splits:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  random_seed: 42
+statistics:
+  total_papers: 500
+  downloaded_papers: 500
+  train_count: 400
+  val_count: 50
+  test_count: 50
+storage:
+  s3_bucket: rag-storage
+  s3_prefix: arxiv/papers

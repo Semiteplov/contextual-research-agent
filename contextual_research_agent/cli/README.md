@@ -65,3 +65,20 @@ python main.py chat
 ```bash
 python stats
 ```
+
+
+## Общий пайплайн
+```bash
+python main.py create-dataset --name="baseline-v1" --total=500 --no-download --min_date="2025-01-01" # создание датасета
+python main.py resume-download --name="baseline-v1" --verify-s3 # скачивание датасета
+
+
+```
+
+## Ingestion
+```bash
+python main.py ingest-file s3://paper.pdf   # Заиндексировать статью из s3
+python main.py ingest-dataset baseline-v1   # Заиндексировать весь датасет
+python main.py ingest-status baseline-v1    # Проверить статус
+python main.py reingest-failed baseline-v1  # Доиндексировать упавшие
+```

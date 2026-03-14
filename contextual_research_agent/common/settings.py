@@ -67,7 +67,7 @@ class MLflowSettings(BaseSettings):
 
     model_config = _make_settings_config("MLFLOW_")
 
-    tracking_uri: str = "http://localhost:5000"
+    tracking_uri: str = "http://100.121.65.75:5050"
     experiment_name: str = "contextual-research-agent"
     artifact_root: str | None = None
 

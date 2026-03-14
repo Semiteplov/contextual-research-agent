@@ -10,7 +10,12 @@ from contextual_research_agent.cli.datasets import (
     resume_download,
     show_dataset,
 )
-from contextual_research_agent.cli.ingestion import ingest_file, ingest_files
+from contextual_research_agent.cli.ingestion import (
+    ingest_dataset,
+    ingest_file,
+    ingest_status,
+    reingest_failed,
+)
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
 
@@ -32,8 +37,10 @@ def main() -> None:
             "export-dataset": export_dataset_config,
             "resume-download": resume_download,
             # Ingestion
-            "ingest-file": ingest_file,
-            "ingest_files": ingest_files,
+            "ingest-file": ingest_file,  # single S3 path
+            "ingest-dataset": ingest_dataset,  # batch by dataset name
+            "ingest-status": ingest_status,  # check progress
+            "reingest-failed": reingest_failed,  # retry failed from report
             # Agent commands
             "query": query,
             "summarize": summarize,

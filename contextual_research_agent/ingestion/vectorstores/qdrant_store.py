@@ -1,142 +1,324 @@
 import asyncio
 import hashlib
+import time
+import uuid
 from collections.abc import Sequence
 from typing import Any
-from uuid import uuid4
 
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from contextual_research_agent.common import logging
 from contextual_research_agent.common.settings import get_settings
-from contextual_research_agent.ingestion.domain.entities import Chunk
+from contextual_research_agent.ingestion.domain.entities import Chunk, ChunkType
+from contextual_research_agent.ingestion.vectorstores.metrics import (
+    SearchMetrics,
+    StoreOperationMetrics,
+)
 
 logger = logging.get_logger(__name__)
 
 
+def _chunk_to_payload(chunk: Chunk) -> dict[str, Any]:
+    """
+    Serialize Chunk → Qdrant payload dict.
+
+    Single source of truth for which fields are stored.
+    All typed fields from Chunk are stored at top level for indexing.
+    """
+    return {
+        "chunk_id": chunk.id,
+        "document_id": chunk.document_id,
+        "text": chunk.text,
+        "token_count": chunk.token_count,
+        "chunk_type": chunk.chunk_type.value,
+        "chunk_index": chunk.chunk_index,
+        "section": chunk.section,
+        "page_numbers": chunk.page_numbers,
+        "is_contextualized": chunk.is_contextualized,
+        "is_fallback": chunk.is_fallback,
+        "is_degenerate": chunk.is_degenerate,
+        "is_oversized": chunk.is_oversized,
+        "metadata": chunk.metadata,
+    }
+
+
+def _payload_to_chunk(payload: dict[str, Any]) -> Chunk:
+    """
+    Deserialize Qdrant payload → Chunk.
+
+    Handles missing fields gracefully for backward compatibility
+    with payloads written before schema changes.
+    """
+    chunk_type_str = payload.get("chunk_type", "text")
+    try:
+        chunk_type = ChunkType(chunk_type_str)
+    except ValueError:
+        chunk_type = ChunkType.TEXT
+
+    return Chunk(
+        id=str(payload.get("chunk_id", "")),
+        document_id=str(payload.get("document_id", "")),
+        text=str(payload.get("text", "")),
+        token_count=int(payload.get("token_count") or 0),
+        chunk_type=chunk_type,
+        chunk_index=int(payload.get("chunk_index") or 0),
+        section=str(payload.get("section") or ""),
+        page_numbers=list(payload.get("page_numbers") or []),
+        is_contextualized=bool(payload.get("is_contextualized", False)),
+        is_fallback=bool(payload.get("is_fallback", False)),
+        is_degenerate=bool(payload.get("is_degenerate", False)),
+        is_oversized=bool(payload.get("is_oversized", False)),
+        metadata=dict(payload.get("metadata") or {}),
+    )
+
+
+def _chunk_id_to_point_id(chunk_id: str) -> str:
+    """Deterministic UUID from chunk_id for idempotent upserts."""
+    hash_bytes = hashlib.sha256(chunk_id.encode()).digest()[:16]
+    return str(uuid.UUID(bytes=hash_bytes, version=4))
+
+
+_DEFAULT_RETRIES = 3
+_DEFAULT_BACKOFF = 0.5
+
+
+async def _retry_async(
+    fn,
+    *,
+    retries: int = _DEFAULT_RETRIES,
+    backoff: float = _DEFAULT_BACKOFF,
+    operation_name: str = "",
+):
+    """
+    Retry an async-offloaded sync function with exponential backoff.
+    Raises the last exception if all retries are exhausted.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return await asyncio.to_thread(fn)
+        except UnexpectedResponse:
+            # Client-side errors (4xx) — don't retry
+            raise
+        except Exception as e:
+            last_exc = e
+            wait = backoff * (2**attempt)
+            logger.warning(
+                "Retry %d/%d for %s: %s (backoff %.1fs)",
+                attempt + 1,
+                retries,
+                operation_name,
+                e,
+                wait,
+            )
+            await asyncio.sleep(wait)
+
+    raise last_exc  # type: ignore[misc]
+
+
+_DISTANCE_MAP = {
+    "cosine": models.Distance.COSINE,
+    "euclid": models.Distance.EUCLID,
+    "dot": models.Distance.DOT,
+}
+
+# Payload fields to index for filtered search
+_PAYLOAD_INDEXES: list[tuple[str, models.PayloadSchemaType]] = [
+    ("document_id", models.PayloadSchemaType.KEYWORD),
+    ("chunk_id", models.PayloadSchemaType.KEYWORD),
+    ("section", models.PayloadSchemaType.KEYWORD),
+    ("chunk_type", models.PayloadSchemaType.KEYWORD),
+    ("chunk_index", models.PayloadSchemaType.INTEGER),
+    ("is_fallback", models.PayloadSchemaType.BOOL),
+    ("is_degenerate", models.PayloadSchemaType.BOOL),
+]
+
+
 class QdrantStore:
+    """
+    Async wrapper around Qdrant for chunk vector storage.
+
+    Prefer `QdrantStore.create()` over direct `__init__` to avoid
+    blocking the event loop during collection initialization.
+    """
+
     def __init__(
         self,
+        client: QdrantClient,
+        collection_name: str,
+        embedding_dim: int,
+        distance: str = "cosine",
+    ):
+        self._client = client
+        self.collection_name = collection_name
+        self.embedding_dim = embedding_dim
+        self.distance = distance
+
+        # Accumulated metrics (optional, for pipeline-level aggregation)
+        self._metrics_log: list[StoreOperationMetrics] = []
+
+    @classmethod
+    async def create(
+        cls,
         collection_name: str = "documents",
         embedding_dim: int = 1024,
         distance: str = "cosine",
         on_disk: bool = False,
     ):
+        """
+        Async factory: creates client, ensures collection exists.
+
+        Usage:
+            store = await QdrantStore.create(collection_name="papers")
+        """
         settings = get_settings()
+        client = QdrantClient(host=settings.qdrant.host, port=settings.qdrant.port)
 
-        self.collection_name = collection_name
-        self.embedding_dim = embedding_dim
-        self.distance = distance
-        self._on_disk = on_disk
+        instance = cls(
+            client=client,
+            collection_name=collection_name,
+            embedding_dim=embedding_dim,
+            distance=distance,
+        )
 
-        self._client = QdrantClient(host=settings.qdrant.host, port=settings.qdrant.port)
+        await instance._ensure_collection(on_disk=on_disk)
+        return instance
 
-        self._ensure_collection()
+    async def _ensure_collection(self, on_disk: bool = False) -> None:
+        """Create collection if it doesn't exist. Idempotent."""
 
-    def _ensure_collection(self) -> None:
-        try:
-            self._client.get_collection(self.collection_name)
-            logger.info(f"Using existing collection: {self.collection_name}")
-        except (UnexpectedResponse, Exception):
-            distance_map = {
-                "cosine": models.Distance.COSINE,
-                "euclid": models.Distance.EUCLID,
-                "dot": models.Distance.DOT,
-            }
+        def _check_and_create():
+            try:
+                self._client.get_collection(self.collection_name)
+                logger.info("Using existing collection: %s", self.collection_name)
+                return
+            except (UnexpectedResponse, Exception):
+                pass
 
             self._client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
                     size=self.embedding_dim,
-                    distance=distance_map.get(self.distance, models.Distance.COSINE),
-                    on_disk=self._on_disk,
+                    distance=_DISTANCE_MAP.get(self.distance, models.Distance.COSINE),
+                    on_disk=on_disk,
                 ),
                 optimizers_config=models.OptimizersConfigDiff(
                     indexing_threshold=20000,
                 ),
             )
-
-            self._create_payload_indexes()
-
             logger.info(
-                f"Created collection: {self.collection_name} "
-                f"(dim={self.embedding_dim}, distance={self.distance})"
+                "Created collection: %s (dim=%d, distance=%s)",
+                self.collection_name,
+                self.embedding_dim,
+                self.distance,
             )
 
-    def _create_payload_indexes(self) -> None:
-        indexes = [
-            ("document_id", models.PayloadSchemaType.KEYWORD),
-            ("chunk_id", models.PayloadSchemaType.KEYWORD),
-            ("section", models.PayloadSchemaType.KEYWORD),
-            ("chunk_index", models.PayloadSchemaType.INTEGER),
-        ]
+        await asyncio.to_thread(_check_and_create)
+        await self._ensure_payload_indexes()
 
-        for field_name, field_schema in indexes:
-            try:
-                self._client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name=field_name,
-                    field_schema=field_schema,
-                )
-            except Exception as e:
-                logger.debug(f"Index creation for {field_name}: {e}")
+    async def _ensure_payload_indexes(self) -> None:
+        """Create payload indexes for filtered search. Idempotent."""
+
+        def _create_indexes():
+            for field_name, field_schema in _PAYLOAD_INDEXES:
+                try:
+                    self._client.create_payload_index(
+                        collection_name=self.collection_name,
+                        field_name=field_name,
+                        field_schema=field_schema,
+                    )
+                except Exception as e:
+                    logger.debug("Index for %s: %s", field_name, e)
+
+        await asyncio.to_thread(_create_indexes)
 
     async def add_chunks(
         self,
         chunks: Sequence[Chunk],
         embeddings: Sequence[list[float]],
         batch_size: int = 128,
-    ) -> int:
+    ) -> tuple[int, StoreOperationMetrics]:
+        """
+        Upsert chunks with embeddings. Returns (count, metrics).
+
+        Idempotent: same chunk_id → same point_id → overwrite.
+        """
         if len(chunks) != len(embeddings):
             raise ValueError(
                 f"Chunks ({len(chunks)}) and embeddings ({len(embeddings)}) count mismatch"
             )
 
         if not chunks:
-            return 0
+            metrics = StoreOperationMetrics(
+                operation="upsert",
+                collection=self.collection_name,
+                duration_ms=0,
+                num_items=0,
+                success=True,
+            )
+            return 0, metrics
 
-        points: list[models.PointStruct] = []
-        for chunk, vec in zip(chunks, embeddings, strict=True):
+        # Validate dimensions
+        for i, (chunk, vec) in enumerate(zip(chunks, embeddings, strict=True)):
             if len(vec) != self.embedding_dim:
                 raise ValueError(
-                    f"Embedding dim mismatch for chunk={chunk.id}: "
+                    f"Embedding dim mismatch at index {i} (chunk={chunk.id}): "
                     f"got {len(vec)}, expected {self.embedding_dim}"
                 )
 
-            payload = {
-                "chunk_id": chunk.id,
-                "document_id": chunk.document_id,
-                "text": chunk.text,
-                "token_count": chunk.token_count,
-                "chunk_index": chunk.chunk_index,
-                "section": chunk.section,
-                "page_numbers": chunk.page_numbers,
-                "metadata": chunk.metadata,
-            }
+        # Build points
+        points = [
+            models.PointStruct(
+                id=_chunk_id_to_point_id(chunk.id),
+                vector=vec,
+                payload=_chunk_to_payload(chunk),
+            )
+            for chunk, vec in zip(chunks, embeddings, strict=True)
+        ]
 
-            point_id = self._chunk_id_to_uuid(chunk.id)
+        t0 = time.monotonic()
+        error_msg = None
+        success = True
 
-            points.append(
-                models.PointStruct(
-                    id=point_id,
-                    vector=vec,
-                    payload=payload,
-                )
+        try:
+
+            def _upsert_batches():
+                for i in range(0, len(points), batch_size):
+                    batch = points[i : i + batch_size]
+                    self._client.upsert(
+                        collection_name=self.collection_name,
+                        points=batch,
+                        wait=True,
+                    )
+
+            await _retry_async(
+                _upsert_batches,
+                operation_name=f"upsert({len(points)} points)",
             )
 
-        def _upsert_batches() -> None:
-            for i in range(0, len(points), batch_size):
-                batch = points[i : i + batch_size]
-                self._client.upsert(
-                    collection_name=self.collection_name,
-                    points=batch,
-                    wait=True,
-                )
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            raise
 
-        await asyncio.to_thread(_upsert_batches)
+        finally:
+            duration = (time.monotonic() - t0) * 1000
+            op_metrics = StoreOperationMetrics(
+                operation="upsert",
+                collection=self.collection_name,
+                duration_ms=duration,
+                num_items=len(points) if success else 0,
+                success=success,
+                error=error_msg,
+            )
+            self._metrics_log.append(op_metrics)
+            logger.info(
+                "Upsert complete",
+                extra=op_metrics.to_dict(),
+            )
 
-        logger.info("Added/updated %d chunks in %s", len(chunks), self.collection_name)
-        return len(chunks)
+        return len(points), op_metrics
 
     async def search(
         self,
@@ -144,88 +326,89 @@ class QdrantStore:
         top_k: int = 10,
         score_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
-    ) -> list[tuple[Chunk, float]]:
+    ) -> tuple[list[tuple[Chunk, float]], SearchMetrics]:
+        """
+        Vector similarity search. Returns (results, metrics).
+
+        Args:
+            query_embedding: Dense vector from embedding model.
+            top_k: Maximum results to return.
+            score_threshold: Minimum similarity score (None = no threshold).
+            filters: Payload field filters (see _build_filter).
+        """
         if len(query_embedding) != self.embedding_dim:
             raise ValueError(
-                "Query embedding dim mismatch: "
+                f"Query embedding dim mismatch: "
                 f"got {len(query_embedding)}, expected {self.embedding_dim}"
             )
 
-        qdrant_filter = self._build_filter(filters) if filters else None
+        qdrant_filter = _build_filter(filters) if filters else None
 
-        def _search():
-            return self._client.query_points(
-                collection_name=self.collection_name,
-                query=query_embedding,
-                limit=top_k,
-                score_threshold=score_threshold,
-                query_filter=qdrant_filter,
-                with_payload=True,
+        t0 = time.monotonic()
+        error_msg = None
+        success = True
+        results: list[tuple[Chunk, float]] = []
+
+        try:
+
+            def _search():
+                return self._client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    limit=top_k,
+                    score_threshold=score_threshold,
+                    query_filter=qdrant_filter,
+                    with_payload=True,
+                )
+
+            response = await _retry_async(
+                _search,
+                operation_name=f"search(top_k={top_k})",
             )
 
-        response = await asyncio.to_thread(_search)
+            for point in response.points:
+                payload = point.payload or {}
+                score = float(point.score) if point.score is not None else 0.0
+                chunk = _payload_to_chunk(payload)
+                results.append((chunk, score))
 
-        output: list[tuple[Chunk, float]] = []
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            raise
 
-        for point in response.points:
-            payload: dict[str, Any] = point.payload or {}
-            score: float = point.score if point.score is not None else 0.0
+        finally:
+            duration = (time.monotonic() - t0) * 1000
+            scores = [s for _, s in results]
 
-            chunk = Chunk(
-                id=str(payload.get("chunk_id", "")),
-                document_id=str(payload.get("document_id", "")),
-                text=str(payload.get("text", "")),
-                token_count=int(payload.get("token_count") or 0),
-                chunk_index=int(payload.get("chunk_index") or 0),
-                section=str(payload.get("section") or ""),
-                page_numbers=list(payload.get("page_numbers") or []),
-                metadata=dict(payload.get("metadata") or {}),
-            )
-            output.append((chunk, float(score)))
-
-        return output
-
-    async def delete_by_document(self, document_id: str) -> int:
-        def _delete():
-            count_result = self._client.count(
-                collection_name=self.collection_name,
-                count_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="document_id",
-                            match=models.MatchValue(value=document_id),
-                        )
-                    ]
+            search_metrics = SearchMetrics(
+                operation="search",
+                collection=self.collection_name,
+                duration_ms=duration,
+                num_items=len(results),
+                success=success,
+                error=error_msg,
+                top_k_requested=top_k,
+                results_returned=len(results),
+                min_score=min(scores) if scores else 0.0,
+                max_score=max(scores) if scores else 0.0,
+                mean_score=sum(scores) / len(scores) if scores else 0.0,
+                above_threshold_count=(
+                    sum(1 for s in scores if s >= score_threshold)
+                    if score_threshold is not None
+                    else len(scores)
                 ),
             )
-            count_before = count_result.count
+            self._metrics_log.append(search_metrics)
 
-            self._client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="document_id",
-                                match=models.MatchValue(value=document_id),
-                            )
-                        ]
-                    )
-                ),
-                wait=True,
-            )
-
-            return count_before
-
-        count = await asyncio.to_thread(_delete)
-        logger.info(f"Deleted {count} chunks for document {document_id}")
-        return count
+        return results, search_metrics
 
     async def get_by_ids(self, chunk_ids: list[str]) -> list[Chunk]:
+        """Retrieve chunks by their IDs."""
         if not chunk_ids:
             return []
 
-        point_ids = [self._chunk_id_to_uuid(cid) for cid in chunk_ids]
+        point_ids = [_chunk_id_to_point_id(cid) for cid in chunk_ids]
 
         def _retrieve():
             return self._client.retrieve(
@@ -234,26 +417,97 @@ class QdrantStore:
                 with_payload=True,
             )
 
-        results = await asyncio.to_thread(_retrieve)
-
-        chunks = []
-        for point in results:
-            payload = point.payload or {}
-            chunk = Chunk(
-                id=str(payload.get("chunk_id", "")),
-                document_id=str(payload.get("document_id", "")),
-                text=str(payload.get("text", "")),
-                token_count=int(payload.get("token_count") or 0),
-                chunk_index=int(payload.get("chunk_index") or 0),
-                section=str(payload.get("section") or ""),
-                page_numbers=list(payload.get("page_numbers") or []),
-                metadata=dict(payload.get("metadata") or {}),
+        t0 = time.monotonic()
+        try:
+            points = await _retry_async(
+                _retrieve,
+                operation_name=f"get_by_ids({len(chunk_ids)})",
             )
-            chunks.append(chunk)
+            chunks = [_payload_to_chunk(p.payload or {}) for p in points]
 
-        return chunks
+            self._metrics_log.append(
+                StoreOperationMetrics(
+                    operation="get_by_ids",
+                    collection=self.collection_name,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                    num_items=len(chunks),
+                    success=True,
+                )
+            )
+            return chunks
+
+        except Exception as e:
+            self._metrics_log.append(
+                StoreOperationMetrics(
+                    operation="get_by_ids",
+                    collection=self.collection_name,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                    num_items=0,
+                    success=False,
+                    error=str(e),
+                )
+            )
+            raise
+
+    async def delete_by_document(self, document_id: str) -> int:
+        """Delete all chunks belonging to a document. Returns count deleted."""
+        doc_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
+            ]
+        )
+
+        def _delete():
+            count_result = self._client.count(
+                collection_name=self.collection_name,
+                count_filter=doc_filter,
+            )
+            count_before = count_result.count
+
+            self._client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=doc_filter),
+                wait=True,
+            )
+            return count_before
+
+        t0 = time.monotonic()
+        try:
+            count = await _retry_async(
+                _delete,
+                operation_name=f"delete(doc={document_id})",
+            )
+            self._metrics_log.append(
+                StoreOperationMetrics(
+                    operation="delete",
+                    collection=self.collection_name,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                    num_items=count,
+                    success=True,
+                )
+            )
+            logger.info("Deleted %d chunks for document %s", count, document_id)
+            return count
+
+        except Exception as e:
+            self._metrics_log.append(
+                StoreOperationMetrics(
+                    operation="delete",
+                    collection=self.collection_name,
+                    duration_ms=(time.monotonic() - t0) * 1000,
+                    num_items=0,
+                    success=False,
+                    error=str(e),
+                )
+            )
+            raise
 
     async def get_stats(self) -> dict[str, Any]:
+        """Collection statistics."""
+
         def _get_stats():
             try:
                 info = self._client.get_collection(self.collection_name)
@@ -264,11 +518,6 @@ class QdrantStore:
                     "status": info.status.value if info.status else "unknown",
                     "embedding_dim": self.embedding_dim,
                     "distance": self.distance,
-                }
-            except UnexpectedResponse:
-                return {
-                    "collection_name": self.collection_name,
-                    "error": "Collection not found",
                 }
             except Exception as e:
                 return {
@@ -298,64 +547,111 @@ class QdrantStore:
 
         result = await asyncio.to_thread(_delete)
         if result:
-            logger.info(f"Deleted collection: {self.collection_name}")
+            logger.info("Deleted collection: %s", self.collection_name)
         return result
 
     async def close(self) -> None:
         self._client.close()
 
-    def _build_filter(self, filters: dict[str, Any]) -> models.Filter | None:
-        conditions: list[models.Condition] = []
+    def get_metrics_log(self) -> list[StoreOperationMetrics]:
+        """Return accumulated operation metrics."""
+        return list(self._metrics_log)
 
-        for key, value in filters.items():
-            if value is None:
-                continue
+    def clear_metrics_log(self) -> None:
+        """Clear accumulated metrics (e.g. between experiment runs)."""
+        self._metrics_log.clear()
 
-            if isinstance(value, (list, tuple, set)):
-                conditions.append(
-                    models.FieldCondition(
-                        key=key,
-                        match=models.MatchAny(any=list(value)),
-                    )
+    def get_metrics_summary(self) -> dict[str, Any]:
+        """Aggregate summary of all operations since last clear."""
+        if not self._metrics_log:
+            return {"total_operations": 0}
+
+        by_op: dict[str, list[StoreOperationMetrics]] = {}
+        for m in self._metrics_log:
+            by_op.setdefault(m.operation, []).append(m)
+
+        summary: dict[str, Any] = {"total_operations": len(self._metrics_log)}
+        for op, entries in by_op.items():
+            durations = [e.duration_ms for e in entries]
+            summary[op] = {
+                "count": len(entries),
+                "success_count": sum(1 for e in entries if e.success),
+                "error_count": sum(1 for e in entries if not e.success),
+                "mean_duration_ms": round(sum(durations) / len(durations), 2),
+                "max_duration_ms": round(max(durations), 2),
+                "total_items": sum(e.num_items for e in entries),
+            }
+        return summary
+
+
+def _build_filter(filters: dict[str, Any]) -> models.Filter | None:
+    """
+    Build Qdrant filter from a flat dict.
+
+    Supported value types:
+      - scalar (str, int, bool) → MatchValue
+      - list/tuple/set → MatchAny
+      - dict with gte/lte/gt/lt keys → Range filter
+    """
+    conditions: list[models.Condition] = []
+
+    for key, value in filters.items():
+        if value is None:
+            continue
+
+        if isinstance(value, bool):
+            # bool before int — Python's bool is subclass of int
+            conditions.append(
+                models.FieldCondition(
+                    key=key,
+                    match=models.MatchValue(value=value),
                 )
-            elif isinstance(value, dict):
-                if "gte" in value or "lte" in value or "gt" in value or "lt" in value:
-                    conditions.append(
-                        models.FieldCondition(
-                            key=key,
-                            range=models.Range(
-                                gte=value.get("gte"),
-                                lte=value.get("lte"),
-                                gt=value.get("gt"),
-                                lt=value.get("lt"),
-                            ),
-                        )
-                    )
-            else:
-                conditions.append(
-                    models.FieldCondition(
-                        key=key,
-                        match=models.MatchValue(value=value),
-                    )
-                )
-
-        return models.Filter(must=conditions) if conditions else None
-
-    @staticmethod
-    def _chunk_id_to_uuid(chunk_id: str) -> str:
-        hash_bytes = hashlib.sha256(chunk_id.encode()).digest()[:16]
-        return str(
-            uuid4().__class__(
-                bytes=hash_bytes,
-                version=4,
             )
-        )
+        elif isinstance(value, (list, tuple, set)):
+            conditions.append(
+                models.FieldCondition(
+                    key=key,
+                    match=models.MatchAny(any=list(value)),
+                )
+            )
+        elif isinstance(value, dict):
+            range_keys = {"gte", "lte", "gt", "lt"}
+            if range_keys & value.keys():
+                conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        range=models.Range(
+                            gte=value.get("gte"),
+                            lte=value.get("lte"),
+                            gt=value.get("gt"),
+                            lt=value.get("lt"),
+                        ),
+                    )
+                )
+        else:
+            conditions.append(
+                models.FieldCondition(
+                    key=key,
+                    match=models.MatchValue(value=value),
+                )
+            )
+
+    return models.Filter(must=conditions) if conditions else None
 
 
-def create_qdrant_store(
-    collection_name: str, embedding_dim: int = 1024, distance: str = "cosine", on_disk: bool = False
+async def create_qdrant_store(
+    collection_name: str = "documents",
+    embedding_dim: int = 1024,
+    distance: str = "cosine",
+    on_disk: bool = False,
 ) -> QdrantStore:
-    return QdrantStore(
+    """
+    Async factory for QdrantStore.
+
+    Usage:
+        store = await create_qdrant_store(collection_name="papers", embedding_dim=1024)
+    """
+    return await QdrantStore.create(
         collection_name=collection_name,
         embedding_dim=embedding_dim,
         distance=distance,
