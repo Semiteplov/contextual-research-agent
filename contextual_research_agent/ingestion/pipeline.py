@@ -143,6 +143,23 @@ class IngestionPipeline:
             },
         )
 
+        formula_not_decoded_count = sum(
+            c.text.count("<!-- formula-not-decoded -->") for c in chunks
+        )
+        equation_chunks_count = sum(1 for c in chunks if c.metadata.get("chunk_type") == "equation")
+        chunks_with_undecoded = sum(
+            1
+            for c in chunks
+            if "<!-- formula-not-decoded -->" in c.text
+            and c.metadata.get("chunk_type") == "equation"
+        )
+
+        for chunk in chunks:
+            chunk.text = chunk.text.replace(
+                "<!-- formula-not-decoded -->",
+                "[mathematical formula — see original PDF]",
+            )
+
         # --- Stage 3: Enrich ---
         t0 = time.perf_counter()
         extraction_metrics = ExtractionMetrics()
@@ -158,12 +175,28 @@ class IngestionPipeline:
             unknown_count = section_dist.get(SectionType.UNKNOWN.value, 0)
             extraction_metrics.unknown_section_rate = unknown_count / len(chunks) if chunks else 0.0
 
+            extraction_metrics.formula_not_decoded_count = formula_not_decoded_count
+            extraction_metrics.formula_total_count = equation_chunks_count
+            extraction_metrics.formula_decode_rate = (
+                1.0 - (chunks_with_undecoded / max(equation_chunks_count, 1))
+                if equation_chunks_count > 0
+                else 1.0
+            )
+
+            logger.info(
+                "Formula quality: %d not decoded / %d equation chunks (%.1f%% decode rate)",
+                formula_not_decoded_count,
+                equation_chunks_count,
+                extraction_metrics.formula_decode_rate * 100,
+            )
+
             logger.info(
                 "Section classification complete",
                 extra={
                     "doc_id": document.id,
                     "distribution": section_dist,
                     "unknown_rate": f"{extraction_metrics.unknown_section_rate:.1%}",
+                    "formula_decode_rate": f"{extraction_metrics.formula_decode_rate:.1%}",
                 },
             )
 

@@ -75,24 +75,18 @@ _RELATION_MAP = {
     "model": "uses_model",
 }
 
-_SYSTEM_PROMPT = """You are a scientific entity extractor. Given text from a scientific paper, extract structured entities.
+_SYSTEM_PROMPT = """Extract key scientific entities from text. Return ONLY valid JSON, no other text.
 
-Entity types:
-- method: algorithms, techniques, approaches (e.g., "LoRA", "dropout", "Adam optimizer", "attention mechanism")
-- dataset: evaluation datasets, benchmarks (e.g., "SQuAD", "MMLU", "ImageNet", "GLUE")
-- task: research tasks, problems (e.g., "question answering", "image classification", "text generation")
-- metric: evaluation metrics (e.g., "F1 score", "accuracy", "BLEU", "perplexity")
-- model: specific model names, architectures (e.g., "GPT-4", "BERT", "ResNet-50", "LLaMA-3")
+Types: method, dataset, task, metric, model.
 
 Rules:
-- Only extract entities explicitly mentioned in the text
-- Use the canonical/most common name (e.g., "LoRA" not "Low-Rank Adaptation")
-- Do not extract generic terms (e.g., "neural network" is too generic, "Transformer" is specific enough)
-- Each entity should appear only once in the output
-- Confidence: 1.0 = explicitly named, 0.7 = strongly implied, 0.5 = weakly implied
+- Only explicitly mentioned entities
+- Canonical names (e.g., "LoRA" not "Low-Rank Adaptation")
+- No generic terms ("neural network" too generic, "Transformer" ok)
+- Confidence: 1.0 = named, 0.7 = implied
 
-Respond with ONLY valid JSON, no other text:
-{"entities": [{"name": "...", "type": "...", "confidence": 0.9}]}"""
+{"entities": [{"name": "...", "type": "...", "confidence": 0.9}]}
+/no_think"""
 
 _SECTION_HINTS = {
     "method": "Focus on: proposed methods, algorithms, architectural components, training techniques, loss functions.",
@@ -112,7 +106,7 @@ def _build_extraction_prompt(text: str, section_type: str) -> str:
     prompt = f"Section type: {section_label}\n"
     if hint:
         prompt += f"{hint}\n"
-    prompt += f"\nText:\n{text[:3000]}"
+    prompt += f"\nText:\n{text[:1500]}"
     return prompt
 
 
@@ -143,7 +137,7 @@ class OllamaProviderAdapter(LLMClient):
             prompt=user,
             system_prompt=system,
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=1024,
         )
         return result.text
 
@@ -157,7 +151,7 @@ class LlamaCppProviderAdapter(LLMClient):
             prompt=user,
             system_prompt=system,
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=1024,
         )
         return result.text
 
@@ -269,6 +263,18 @@ class EntityExtractor:
             "unknown",
         }
 
+    @staticmethod
+    def _select_representative_chunks(
+        chunks: list[Chunk],
+        max_per_section: int = 3,
+    ) -> list[Chunk]:
+        """Select most informative chunks per section."""
+        text_chunks = [
+            c for c in chunks if c.metadata.get("chunk_type", "text") in ("text", "table")
+        ]
+        text_chunks.sort(key=lambda c: len(c.text), reverse=True)
+        return text_chunks[:max_per_section]
+
     async def extract(
         self,
         document_id: str,
@@ -294,12 +300,16 @@ class EntityExtractor:
                 if section_type in self._skip_sections:
                     continue
 
-                for i in range(0, len(section_chunks), self._max_chunks_per_call):
-                    batch = section_chunks[i : i + self._max_chunks_per_call]
-                    combined_text = "\n\n".join(c.text for c in batch)
+                selected = self._select_representative_chunks(
+                    section_chunks,
+                    max_per_section=3,
+                )
+                if not selected:
+                    continue
 
-                    prompt = _build_extraction_prompt(combined_text, section_type)
-                    tasks.append((section_type, combined_text, prompt))
+                combined_text = "\n\n".join(c.text for c in selected)
+                prompt = _build_extraction_prompt(combined_text, section_type)
+                tasks.append((section_type, combined_text, prompt))
 
             sem = asyncio.Semaphore(4)
 
