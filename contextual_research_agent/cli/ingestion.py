@@ -16,7 +16,6 @@ from contextual_research_agent.ingestion.embeddings.hf_embedder import create_hf
 from contextual_research_agent.ingestion.extraction.entity_extractor import (
     EntityExtractor,
     LlamaCppProviderAdapter,
-    OllamaProviderAdapter,
 )
 from contextual_research_agent.ingestion.parsers.docling import create_docling_parser
 from contextual_research_agent.ingestion.pipeline import IngestionPipeline
@@ -28,7 +27,7 @@ logger = get_logger(__name__)
 
 
 async def _create_pipeline(  # noqa: PLR0913
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection_name: str = "documents",
     max_tokens: int = 512,
     merge_peers: bool = True,
@@ -38,7 +37,7 @@ async def _create_pipeline(  # noqa: PLR0913
     distance: str = "cosine",
     on_disk: bool = False,
     device: str | None = None,
-    batch_size: int = 32,
+    batch_size: int = 16,
     enable_graph: bool = True,
     print_summary: bool = True,
     enable_entities: bool = True,
@@ -120,7 +119,7 @@ async def _create_pipeline(  # noqa: PLR0913
 
 def ingest_file(  # noqa: PLR0913
     file_path: str,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
@@ -213,7 +212,7 @@ def ingest_file(  # noqa: PLR0913
 def ingest_dataset(  # noqa: PLR0913
     name: str,
     split: str | None = None,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
@@ -407,7 +406,7 @@ def ingest_status(
 def reingest_failed(  # noqa: PLR0913
     name: str,
     report_path: str | None = None,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
