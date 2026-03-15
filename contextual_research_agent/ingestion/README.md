@@ -231,7 +231,7 @@ MLflow интеграция. Логирует конфигурацию как pa
 
 | Параметр | CLI флаг | Default | Влияние |
 |---|---|---|---|
-| `embedding_model` | `--embedding-model` | BAAI/bge-m3 | Определяет качество семантического представления. Токенизатор модели должен совпадать с токенизатором чанкинга. |
+| `embedding_model` | `--embedding-model` | Qwen/Qwen3-Embedding-0.6B | Определяет качество семантического представления. Токенизатор модели должен совпадать с токенизатором чанкинга. |
 | `normalize` | — | True | L2-нормализация. Необходима для cosine similarity. |
 | `batch_size` | `--batch-size` | 32 | Batch size для GPU inference. Влияет на throughput, не на качество. |
 
@@ -255,7 +255,7 @@ python main.py ingest-file <s3_path> [options]
 
 ```bash
 python main.py ingest-file s3://rag-storage/arxiv/papers/2401.12345.pdf \
-    --embedding-model=BAAI/bge-m3 \
+    --embedding-model=Qwen/Qwen3-Embedding-0.6B \
     --max-tokens=512 \
     --collection=documents \
     --distance=cosine \

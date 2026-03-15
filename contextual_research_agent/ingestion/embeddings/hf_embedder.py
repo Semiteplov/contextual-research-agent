@@ -1,7 +1,7 @@
 import asyncio
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-import time
 from typing import Any
 
 from sentence_transformers import SentenceTransformer
@@ -42,7 +42,7 @@ _MODEL_CONFIGS: dict[str, ModelInstructionConfig] = {
     ),
     "qwen3-embedding": ModelInstructionConfig(
         query_prompt_name="query",
-        passage_prompt_name="passage",
+        passage_prompt_name="document",
     ),
 }
 
@@ -109,7 +109,11 @@ class HuggingFaceEmbedder(Embedder):
         )
 
         logger.info(f"Loading embedding model: {model}")
-        self._model = SentenceTransformer(model, device=device)
+        self._model = SentenceTransformer(
+            model,
+            device=device,
+            model_kwargs={"torch_dtype": "float16"},
+        )
 
         dim = self._model.get_sentence_embedding_dimension()
         if dim is None:
@@ -117,8 +121,6 @@ class HuggingFaceEmbedder(Embedder):
         self._dimension = int(dim)
 
         self._supports_prompts = bool(getattr(self._model, "prompts", None))
-
-        self._model = SentenceTransformer(model, device=device)
 
         logger.info(
             f"Loaded {model} (dim={self._dimension}, "
@@ -314,7 +316,7 @@ def create_hf_embedder(  # noqa: PLR0913
     """
     Factory for HuggingFaceEmbedder.
 
-    Default model: BAAI/bge-m3 (1024-dim, multilingual, no instruction needed).
+    Default model: Qwen/Qwen3-Embedding-4B.
     For Qwen3-Embedding: prompts are auto-configured via prompt_name.
     For BGE: query instruction is auto-configured.
     For E5: both query and passage instructions are auto-configured.
