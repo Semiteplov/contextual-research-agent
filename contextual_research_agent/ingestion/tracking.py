@@ -211,6 +211,19 @@ class IngestionTracker:
                 }
             )
 
+        # Extraction metrics
+        if m.extraction:
+            ex = m.extraction
+            mlflow.log_metrics(
+                {
+                    "extraction/section_classify_ms": float(ex.section_classify_ms),
+                    "extraction/unknown_section_rate": float(ex.unknown_section_rate),
+                    "extraction/total_references": float(ex.total_references),
+                    "extraction/resolved_references": float(ex.resolved_references),
+                    "extraction/resolution_rate": float(ex.resolution_rate),
+                }
+            )
+
     @staticmethod
     def _log_latency_aggregates(batch: BatchResult) -> None:
         """Aggregate latency across successful results."""
