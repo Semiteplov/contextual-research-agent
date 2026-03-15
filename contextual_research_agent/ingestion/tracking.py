@@ -221,6 +221,9 @@ class IngestionTracker:
                     "extraction/total_references": float(ex.total_references),
                     "extraction/resolved_references": float(ex.resolved_references),
                     "extraction/resolution_rate": float(ex.resolution_rate),
+                    "extraction/formula_decode_rate": float(ex.formula_decode_rate),
+                    "extraction/formula_not_decoded_count": float(ex.formula_not_decoded_count),
+                    "extraction/formula_total_count": float(ex.formula_total_count),
                 }
             )
 

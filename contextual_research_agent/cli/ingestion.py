@@ -229,6 +229,8 @@ def ingest_dataset(  # noqa: PLR0913
     limit: int | None = None,
     no_tracking: bool = False,
     no_graph: bool = False,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
 ) -> None:
     """
     Ingest all papers from a dataset into the vector store.
@@ -320,6 +322,8 @@ def ingest_dataset(  # noqa: PLR0913
             device=device,
             batch_size=batch_size,
             enable_graph=not no_graph,
+            enable_entities=enable_entities,
+            enable_paper_index=enable_paper_index,
         )
 
         try:
@@ -413,6 +417,8 @@ def reingest_failed(  # noqa: PLR0913
     device: str | None = None,
     no_tracking: bool = False,
     no_graph: bool = False,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
 ) -> None:
     """
     Re-ingest papers that failed in a previous batch run.
@@ -463,6 +469,9 @@ def reingest_failed(  # noqa: PLR0913
             filter_empty_chunks=filter_empty,
             distance=distance,
             device=device,
+            enable_graph=not no_graph,
+            enable_entities=enable_entities,
+            enable_paper_index=enable_paper_index,
         )
 
         _print_config(config, collection, distance)

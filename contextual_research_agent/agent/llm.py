@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -184,7 +185,13 @@ class LlamaCppProvider(LLMProvider):
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             choice = data["choices"][0]
-            text = choice["message"]["content"]
+            text = choice["message"].get("content") or ""
+
+            if not text.strip() and choice["message"].get("reasoning_content"):
+                reasoning = choice["message"]["reasoning_content"]
+                json_match = re.search(r'\{"entities":\s*\[.*?\]\}', reasoning, re.DOTALL)
+                if json_match:
+                    text = json_match.group(0)
 
             usage = data.get("usage", {})
             prompt_tokens = usage.get("prompt_tokens", 0)

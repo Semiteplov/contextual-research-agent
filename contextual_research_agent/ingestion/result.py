@@ -60,6 +60,11 @@ class ExtractionMetrics:
     section_type_distribution: dict[str, int] = field(default_factory=dict)
     unknown_section_rate: float = 0.0
 
+    # Formula quality
+    formula_not_decoded_count: int = 0
+    formula_total_count: int = 0
+    formula_decode_rate: float = 0.0
+
     # Citation extraction
     citation_extract_ms: float = 0.0
     total_references: int = 0
@@ -75,6 +80,9 @@ class ExtractionMetrics:
             "total_references": self.total_references,
             "resolved_references": self.resolved_references,
             "resolution_rate": round(self.resolution_rate, 3),
+            "formula_not_decoded_count": self.formula_not_decoded_count,
+            "formula_total_count": self.formula_total_count,
+            "formula_decode_rate": round(self.formula_decode_rate, 3),
         }
 
 

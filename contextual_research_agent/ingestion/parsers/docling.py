@@ -317,6 +317,9 @@ class DoclingParser:
                 num_threads=cfg.num_threads,
                 device=cfg.device,
             )
+            # pipeline.generate_picture_images = True
+            # pipeline.do_formula_enrichment = True
+            # pipeline.do_code_enrichment = True
 
             self._converter = DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline)}
