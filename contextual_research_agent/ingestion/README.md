@@ -2,13 +2,14 @@
 
 ## Назначение
 
-Модуль `ingestion` реализует полный цикл преобразования научных PDF-статей в индексированные векторные представления для RAG. Pipeline принимает PDF-документ и выполняет последовательную цепочку: **парсинг → чанкинг → эмбеддинг → индексация**.
+Модуль ingestion реализует полный цикл преобразования научных PDF-статей в индексированные, обогащённые векторные представления для системы Retrieval-Augmented Generation (RAG). Pipeline принимает PDF-документ и выполняет цепочку: парсинг → чанкинг → обогащение (section classification + citation extraction) → эмбеддинг → индексация → сохранение графовых связей.
 
 Модуль спроектирован как **data pipeline**, отделённый от agent-уровня. Это позволяет:
 
 - запускать ingestion независимо от LLM/agent инфраструктуры;
 - проводить ablation studies по параметрам ingestion без изменения agent логики;
 - масштабировать ingestion горизонтально (batch, concurrent).
+- строить knowledge graph (citation + entity edges) параллельно с индексацией.
 
 ### Архитектурное решение: почему не LangGraph
 
@@ -20,51 +21,68 @@ Ingestion pipeline — линейная цепочка (parse → chunk → embe
 PDF (S3)
   │
   ▼
-┌─────────────────────────────────────────────────────────────┐
-│  DoclingParser                                              │
-│  ┌───────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │ PDF → Doc │ →  │ Структурное  │ →  │ HybridChunker    │  │
-│  │ Converter │    │ извлечение   │    │ (hierarchical    │  │
-│  │ (Docling) │    │ (title,      │    │  + merge_peers   │  │
-│  │           │    │  abstract,   │    │  + context)      │  │
-│  │           │    │  sections)   │    │                  │  │
-│  └───────────┘    └──────────────┘    └──────────────────┘  │
-│                                              │              │
-│  Serializers:                                │              │
-│  • MarkdownTableSerializer                   │              │
-│  • AnnotationPictureSerializer               │              │
-└──────────────────────────────────────────────┼──────────────┘
-                                               │
-                                    list[Chunk] + ChunkingMetrics
-                                               │
-                                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│  HuggingFaceEmbedder                                        │
-│  • SentenceTransformers backend                             │
-│  • prompt_name / prefix routing по семейству модели         │
-│  • L2 нормализация                                          │
-└─────────────────────────────────────────────────────────────┘
-                                               │
-                                    list[list[float]] + EmbeddingMetrics
-                                               │
-                                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│  QdrantStore                                                │
-│  • Детерминированные point ID (SHA-256 → UUID)              │
-│  • Payload indexes для фильтрации по типу, секции, документу│
-│  • Retry с exponential backoff                              │
-└─────────────────────────────────────────────────────────────┘
-                                               │
-                                    StoreOperationMetrics
-                                               │
-                                               ▼
-                                    IngestionResult
-                                    (IngestionMetrics: latency + chunking
-                                     + embedding + indexing)
-                                               │
-                                               ▼
-                                    MLflow (IngestionTracker)
-                                    + JSON report
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 1: DoclingParser.parse()                              │
+│  PDF → DoclingDocument (structured: sections, tables, figs)  │
+│  → Document (title, abstract, sections) + ParseResult        │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 2: DoclingParser.extract_chunks()                     │
+│  HybridChunker (hierarchical + merge_peers + context)        │
+│  Serializers: MarkdownTable + AnnotationPicture              │
+│  → list[Chunk] + ChunkingMetrics                             │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 3: Enrichment                                         │
+│                                                              │
+│  ┌────────────────────────────────────────────┐              │
+│  │  SectionClassifier (rule-based)            │              │
+│  │  heading → SectionType enum                │              │
+│  │  3 strategies: direct → parent → propagate │              │
+│  │  14 types: METHOD, EXPERIMENTS, RESULTS... │              │
+│  └────────────────────────────────────────────┘              │
+│                                                              │
+│  ┌────────────────────────────────────────────┐              │
+│  │  CitationExtractor                         │              │
+│  │  bib_entries / markdown fallback           │              │
+│  │  arxiv_id + DOI resolution                 │              │
+│  │  inline citation context extraction        │              │
+│  │  → CitationEdge[] + ExtractionMetrics      │              │
+│  └────────────────────────────────────────────┘              │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 4: HuggingFaceEmbedder                                │
+│  SentenceTransformers, prompt_name/prefix routing, L2 norm   │
+│  → list[list[float]] + EmbeddingMetrics                      │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 5: QdrantStore                                        │
+│  Deterministic point IDs, payload indexes, retry + backoff   │
+│  → StoreOperationMetrics                                     │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Stage 6: KnowledgeGraphRepository                           │
+│  citation_edges, entities, paper_entity_edges                │
+│  → Graph storage metrics                                     │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+                 IngestionResult + IngestionMetrics
+                           │
+                     ┌─────┴─────┐
+                     ▼           ▼
+               MLflow        JSON report
+          (IngestionTracker)
 ```
 
 ## Структура модуля
@@ -73,20 +91,31 @@ PDF (S3)
 ingestion/
 ├── parsers/
 │   ├── base.py              # DocumentParser ABC
-│   ├── config.py            # DoclingParserConfig, ChunkType (без внутренних импортов)
+│   ├── config.py            # DoclingParserConfig, ChunkType (без циклических импортов)
 │   ├── metrics.py           # ChunkingMetrics, compute/aggregate
 │   ├── serializers.py       # ScientificSerializerProvider, AnnotationPictureSerializer
 │   └── docling.py           # DoclingParser, ParseResult, create_docling_parser
+├── extraction/              # enrichment stage
+│   ├── __init__.py
+│   ├── section_classifier.py  # SectionType, SectionClassifier
+│   └── citation_extractor.py  # CitationExtractor, CitationEdge, BibEntry
 ├── embeddings/
 │   ├── base.py              # Embedder ABC
 │   └── hf_embedder.py       # HuggingFaceEmbedder, EmbeddingMetrics
 ├── vectorstores/
 │   └── qdrant_store.py      # QdrantStore, StoreOperationMetrics, SearchMetrics
 ├── domain/
-│   ├── entities.py          # Document, Chunk, RetrievedChunk, Citation, ChunkType
+│   ├── entities.py          # Document, Chunk, RetrievedChunk, Citation
 │   └── types.py             # DocumentStatus enum
-├── pipeline.py              # IngestionPipeline, IngestionResult, BatchResult, StageLatency
-└── tracking.py              # IngestionTracker (MLflow интеграция)
+├── pipeline.py              # IngestionPipeline, IngestionResult, BatchResult
+└── tracking.py              # IngestionTracker (MLflow)
+
+db/
+├── repositories/
+│   ├── datasets.py          # DatasetsRepository
+│   └── knowledge_graph.py   # KnowledgeGraphRepository
+└── migrations/
+    └── 003_knowledge_graph.sql  # entities, citation_edges, paper_entity_edges
 ```
 
 ## Компоненты
@@ -98,6 +127,48 @@ ingestion/
 1. **Parse**: PDF → DoclingDocument (структурированное представление с labeled items: section headers, paragraphs, tables, figures). Метод возвращает `ParseResult`, содержащий сериализуемый `Document` и in-memory `DoclingDocument`. DoclingDocument **не** хранится в `Document.metadata` во избежание утечек памяти и проблем сериализации.
 
 2. **Extract chunks**: DoclingDocument → `list[Chunk]` + `ChunkingMetrics` через HybridChunker. Chunker комбинирует иерархическое разбиение (по секциям документа) с контролем длины в токенах embedding-модели.
+
+### SectionClassifier
+
+Rule-based классификатор типа секции по заголовку. Определяет 14 семантических типов: `TITLE`, `ABSTRACT`, `INTRODUCTION`, `RELATED_WORK`, `BACKGROUND`, `METHOD`, `EXPERIMENTS`, `RESULTS`, `DISCUSSION`, `CONCLUSION`, `LIMITATIONS`, `ETHICS`, `APPENDIX`, `REFERENCES`.
+
+Три стратегии классификации, применяемые последовательно:
+
+1. **Direct match**: нормализованный заголовок → regex паттерны . Пример: `"3.1 Experimental Setup"` → normalize → `"experimental setup"` → EXPERIMENTS.
+
+2. **Parent section inheritance**: если `"2.1. Problem Setup"` → UNKNOWN, извлекается номер секции `"2.1"` → parent `"2"` → heading `"2. Background"` → BACKGROUND. Поддерживает multi-level: `"3.2.1"` → `"3.2"` → `"3"`.
+
+3. **Propagation**: если всё ещё UNKNOWN, наследуется тип от предыдущего чанка. Корректно для последовательного порядка чанков в документе.
+
+Зачем: секция `section_type` хранится в Qdrant payload → позволяет **task-aware retrieval**: для critique → фильтр по `METHOD + EXPERIMENTS`, для survey → `RELATED_WORK + INTRODUCTION`, для comparison → `RESULTS + EXPERIMENTS`.
+
+### CitationExtractor
+
+Извлечение и резолвинг цитат из научных статей.
+
+**Extraction pipeline**:
+
+1. **Parse bibliography**: из `DoclingDocument.bib_entries` (structured) → если недоступно → fallback: парсинг References секции из markdown. Универсальный splitter поддерживает 4 формата: bullet lists (`- Author...`), numbered brackets (`[1] Author...`), numbered dot (`1. Author...`), paragraph-based.
+
+2. **Title extraction**: из raw reference string. Детектирует конец author block по паттерну "инициала + точка + пробел + слово ≥3 букв" (`"...Petzold, L. Selecting the Metric..."`). Handles year markers `(2021).` и `, 2021.`. Strips trailing page references `(pages 1, 2, 3)`.
+
+3. **Identifier resolution**: regex для arxiv ID (из URL, bare text, `arXiv:XXXX.XXXXX`), DOI.
+
+4. **Context extraction**: находит inline citation anchors (`[12]`, `[1-3]`, `[1, 3, 5]`) в chunk text.
+
+**Output**: `CitationEdge[]` — направленные рёбра (citing_paper → cited_paper) с контекстом, секцией, метаданными.
+
+### Knowledge Graph (PostgreSQL)
+
+Три таблицы для графовых связей:
+
+**`entities`** — научные концепты (methods, datasets, tasks, metrics, models) с дедупликацией по `(normalized_name, entity_type)`.
+
+**`citation_edges`** — Paper → Paper с контекстом цитирования: предложение, секция, тип секции. Позволяет отвечать "кто цитирует эту работу и в каком контексте".
+
+**`paper_entity_edges`** — Paper → Entity: `uses_method`, `uses_dataset`, `targets_task`. Confidence score для оценки качества extraction.
+
+Граф хранится в PostgreSQL — recursive CTE.
 
 ### HuggingFaceEmbedder
 
