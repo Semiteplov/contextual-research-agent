@@ -13,6 +13,7 @@ from contextual_research_agent.db.repositories.knowledge_graph import KnowledgeG
 from contextual_research_agent.ingestion.analytics import IngestionAnalytics
 from contextual_research_agent.ingestion.domain.entities import DoclingParserConfig
 from contextual_research_agent.ingestion.embeddings.hf_embedder import create_hf_embedder
+from contextual_research_agent.ingestion.embeddings.sparse import SparseEncoder
 from contextual_research_agent.ingestion.extraction.entity_extractor import (
     EntityExtractor,
     LlamaCppProviderAdapter,
@@ -42,6 +43,8 @@ async def _create_pipeline(  # noqa: PLR0913
     print_summary: bool = True,
     enable_entities: bool = True,
     enable_paper_index: bool = True,
+    enable_sparse: bool = False,
+    sparse_model: str = "Qdrant/bm25",
 ):
     """
     Build ingestion pipeline with all components.
@@ -76,6 +79,8 @@ async def _create_pipeline(  # noqa: PLR0913
         embedding_dim=embedder.dimension,
         distance=distance,
         on_disk=on_disk,
+        sparse_vector_name="sparse" if enable_sparse else None,
+        dense_vector_name="dense" if enable_sparse else None,
     )
 
     entity_extractor = None
@@ -105,6 +110,10 @@ async def _create_pipeline(  # noqa: PLR0913
             conn = None
             graph_repo = None
 
+    sparse_encoder = None
+    if enable_sparse:
+        sparse_encoder = SparseEncoder(model_name=sparse_model)
+
     pipeline = IngestionPipeline(
         parser=parser,
         embedder=embedder,
@@ -112,6 +121,7 @@ async def _create_pipeline(  # noqa: PLR0913
         paper_store=paper_store,
         graph_repo=graph_repo,
         entity_extractor=entity_extractor,
+        sparse_encoder=sparse_encoder,
     )
 
     return pipeline, config, conn
@@ -134,6 +144,8 @@ def ingest_file(  # noqa: PLR0913
     no_graph: bool = False,
     enable_entities: bool = True,
     enable_paper_index: bool = True,
+    enable_sparse: bool = False,
+    sparse_model: str = "Qdrant/bm25",
 ) -> None:
     """
     Ingest a single PDF file into the vector store.
@@ -181,6 +193,8 @@ def ingest_file(  # noqa: PLR0913
             enable_graph=not no_graph,
             enable_entities=enable_entities,
             enable_paper_index=enable_paper_index,
+            enable_sparse=enable_sparse,
+            sparse_model=sparse_model,
         )
 
         _print_config(config, collection, distance)

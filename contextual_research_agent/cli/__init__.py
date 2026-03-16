@@ -17,6 +17,15 @@ from contextual_research_agent.cli.ingestion import (
     print_ingestion_analytics,
     reingest_failed,
 )
+from contextual_research_agent.cli.retrieval import (
+    evaluate as retrieval_evaluate,
+)
+from contextual_research_agent.cli.retrieval import (
+    generate_eval_set,
+)
+from contextual_research_agent.cli.retrieval import (
+    retrieve as retrieval_retrieve,
+)
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
 
@@ -50,5 +59,9 @@ def main() -> None:
             "chat": chat,
             "stats": stats,
             "list-docs": list_docs,
+            # Retrieval commands
+            "retrieval-retrieve": retrieval_retrieve,  # query → multi-channel retrieval
+            "retrieval-evaluate": retrieval_evaluate,  # run eval set → IR metrics → MLflow
+            "generate-eval-set": generate_eval_set,  # corpus → synthetic eval queries
         }
     )

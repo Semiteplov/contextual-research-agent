@@ -20,6 +20,7 @@ class StageLatency:
     enrich_ms: float = 0.0  # section classify + citation extract
     entity_extract_ms: float = 0.0  # LLM entity extraction
     embed_ms: float = 0.0  # chunk embeddings
+    sparse_embed_ms: float = 0.0
     paper_embed_ms: float = 0.0  # paper-level embedding
     index_ms: float = 0.0
     graph_store_ms: float = 0.0
@@ -44,6 +45,7 @@ class StageLatency:
             "enrich_ms": round(self.enrich_ms, 1),
             "entity_extract_ms": round(self.entity_extract_ms, 1),
             "embed_ms": round(self.embed_ms, 1),
+            "sparse_embed_ms": round(self.sparse_embed_ms, 1),
             "paper_embed_ms": round(self.paper_embed_ms, 1),
             "index_ms": round(self.index_ms, 1),
             "graph_store_ms": round(self.graph_store_ms, 1),

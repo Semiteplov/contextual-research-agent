@@ -18,9 +18,9 @@ Ingestion pipeline — линейная цепочка (parse → chunk → embe
 ## Архитектура
 
 ```
-PDF (S3)
-  │
-  ▼
+                         PDF (S3)
+                           │
+                           ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Stage 1: DoclingParser.parse()                              │
 │  PDF → DoclingDocument (sections, tables, figures)           │

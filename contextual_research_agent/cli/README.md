@@ -83,3 +83,33 @@ python main.py ingest-status baseline-v1    # Проверить статус
 python main.py reingest-failed baseline-v1  # Доиндексировать упавшие
 python main.py ingestion-analytics baseline-v1 --log-mlflow
 ```
+
+## Retrieval
+```bash
+python main.py retrieval-retrieve "How does LoRA reduce training cost?" \
+    --collection=documents_test \
+    --top-k=5 \
+    --no-rerank \
+    --channels=dense \
+    --verbose                   # Базовый retrieve
+python main.py retrieval-retrieve "How does LoRA reduce training cost?" \
+    --collection=documents_test \
+    --top-k=5 \
+    --rerank \
+    --channels=dense            # Retrieve с reranker
+python main.py retrieval-retrieve "What datasets were used for evaluation?" \
+    --collection=documents_test \
+    --channels=dense,graph_citation,graph_entity \
+    --rerank \
+    --verbose                   # Multi-channel (dense + graph)
+python main.py generate-eval-set \
+    --collection=documents_test \
+    --num-queries=20 \
+    --output=eval/test_v1.json  # Сгенерировать eval set из collection
+python main.py retrieval-evaluate eval/test_v1.json \
+    --collection=documents_test \
+    --channels=dense \
+    --rerank \
+    --experiment-name=retrieval_test \
+    --run-name=dense_rerank     # Прогнать evaluation
+```
