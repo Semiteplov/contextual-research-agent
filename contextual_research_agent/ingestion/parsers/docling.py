@@ -35,6 +35,8 @@ from contextual_research_agent.ingestion.domain.entities import (
     ChunkType,
     DoclingParserConfig,
     Document,
+    DocumentConfig,
+    ParserType,
 )
 from contextual_research_agent.ingestion.domain.types import DocumentStatus
 from contextual_research_agent.ingestion.parsers.metrics import (
@@ -315,6 +317,9 @@ class DoclingParser:
                 num_threads=cfg.num_threads,
                 device=cfg.device,
             )
+            # pipeline.generate_picture_images = True
+            # pipeline.do_formula_enrichment = True
+            # pipeline.do_code_enrichment = True
 
             self._converter = DocumentConverter(
                 format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline)}
@@ -397,22 +402,21 @@ class DoclingParser:
                 source_path=key,
                 title=title,
                 abstract=abstract,
+                sections=sections,
+                num_pages=len(getattr(docling_doc, "pages", {})),
                 status=DocumentStatus.PARSED,
                 content_hash=content_hash,
+                markdown_s3_key=md_key,
+                markdown_s3_uri=md_uri,
+                parse_config=DocumentConfig(
+                    parser=ParserType.DOCLING,
+                    embedding_model=self._config.embedding_model,
+                    max_tokens=self._config.max_tokens,
+                    include_context=self._config.include_context,
+                    merge_peers=self._config.merge_peers,
+                ),
                 metadata={
                     "parser": "docling",
-                    "config": {
-                        "max_tokens": self._config.max_tokens,
-                        "embedding_model": self._config.embedding_model,
-                        "include_context": self._config.include_context,
-                        "merge_peers": self._config.merge_peers,
-                    },
-                    "num_pages": getattr(docling_doc, "num_pages", 0),
-                    "sections": sections,
-                    "markdown_key": md_key,
-                    "markdown_uri": md_uri,
-                    # NOTE: _docling_doc is intentionally NOT stored here.
-                    # Pass it explicitly via ParseResult.docling_doc.
                 },
             )
 

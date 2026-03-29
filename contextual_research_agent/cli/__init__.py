@@ -14,6 +14,7 @@ from contextual_research_agent.cli.ingestion import (
     ingest_dataset,
     ingest_file,
     ingest_status,
+    print_ingestion_analytics,
     reingest_failed,
 )
 from contextual_research_agent.common.logging import setup_logging
@@ -41,6 +42,7 @@ def main() -> None:
             "ingest-dataset": ingest_dataset,  # batch by dataset name
             "ingest-status": ingest_status,  # check progress
             "reingest-failed": reingest_failed,  # retry failed from report
+            "ingestion-analytics": print_ingestion_analytics,
             # Agent commands
             "query": query,
             "summarize": summarize,

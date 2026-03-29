@@ -81,4 +81,5 @@ python main.py ingest-file s3://paper.pdf   # Заиндексировать с�
 python main.py ingest-dataset baseline-v1   # Заиндексировать весь датасет
 python main.py ingest-status baseline-v1    # Проверить статус
 python main.py reingest-failed baseline-v1  # Доиндексировать упавшие
+python main.py ingestion-analytics baseline-v1 --log-mlflow
 ```

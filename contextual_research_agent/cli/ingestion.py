@@ -4,12 +4,19 @@ import asyncio
 import json
 from pathlib import Path
 
+from contextual_research_agent.agent.llm import LlamaCppProvider, OllamaProvider
 from contextual_research_agent.common.logging import get_logger
 from contextual_research_agent.common.settings import get_settings
 from contextual_research_agent.db.connection import get_connection
 from contextual_research_agent.db.repositories.datasets import DatasetsRepository
+from contextual_research_agent.db.repositories.knowledge_graph import KnowledgeGraphRepository
+from contextual_research_agent.ingestion.analytics import IngestionAnalytics
 from contextual_research_agent.ingestion.domain.entities import DoclingParserConfig
 from contextual_research_agent.ingestion.embeddings.hf_embedder import create_hf_embedder
+from contextual_research_agent.ingestion.extraction.entity_extractor import (
+    EntityExtractor,
+    LlamaCppProviderAdapter,
+)
 from contextual_research_agent.ingestion.parsers.docling import create_docling_parser
 from contextual_research_agent.ingestion.pipeline import IngestionPipeline
 from contextual_research_agent.ingestion.result import BatchResult, IngestionResult
@@ -20,7 +27,7 @@ logger = get_logger(__name__)
 
 
 async def _create_pipeline(  # noqa: PLR0913
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection_name: str = "documents",
     max_tokens: int = 512,
     merge_peers: bool = True,
@@ -30,8 +37,12 @@ async def _create_pipeline(  # noqa: PLR0913
     distance: str = "cosine",
     on_disk: bool = False,
     device: str | None = None,
-    batch_size: int = 32,
-) -> tuple[IngestionPipeline, DoclingParserConfig]:
+    batch_size: int = 16,
+    enable_graph: bool = True,
+    print_summary: bool = True,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
+):
     """
     Build ingestion pipeline with all components.
 
@@ -67,18 +78,48 @@ async def _create_pipeline(  # noqa: PLR0913
         on_disk=on_disk,
     )
 
+    entity_extractor = None
+    if enable_entities:
+        # provider = OllamaProvider(model="qwen3:4b")
+        # llm_client = OllamaProviderAdapter(provider)
+        # entity_extractor = EntityExtractor(llm_client=llm_client)
+        provider = LlamaCppProvider(model="qwen3:4b")
+        llm_client = LlamaCppProviderAdapter(provider)
+        entity_extractor = EntityExtractor(llm_client=llm_client)
+
+    paper_store = None
+    if enable_paper_index:
+        paper_store = await create_qdrant_store(
+            collection_name=f"{collection_name}_papers",
+            embedding_dim=embedder.dimension,
+        )
+
+    graph_repo = None
+    conn = None
+    if enable_graph:
+        try:
+            conn = get_connection("arxiv")
+            graph_repo = KnowledgeGraphRepository(conn)
+        except Exception as e:
+            logger.warning("Could not connect to PostgreSQL for graph storage: %s", e)
+            conn = None
+            graph_repo = None
+
     pipeline = IngestionPipeline(
         parser=parser,
         embedder=embedder,
         vector_store=store,
+        paper_store=paper_store,
+        graph_repo=graph_repo,
+        entity_extractor=entity_extractor,
     )
 
-    return pipeline, config
+    return pipeline, config, conn
 
 
 def ingest_file(  # noqa: PLR0913
     file_path: str,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
@@ -90,6 +131,9 @@ def ingest_file(  # noqa: PLR0913
     batch_size: int = 32,
     save_report: bool = True,
     no_tracking: bool = False,
+    no_graph: bool = False,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
 ) -> None:
     """
     Ingest a single PDF file into the vector store.
@@ -123,7 +167,7 @@ def ingest_file(  # noqa: PLR0913
     """
 
     async def _run() -> None:
-        pipeline, config = await _create_pipeline(
+        pipeline, config, conn = await _create_pipeline(
             embedding_model=embedding_model,
             collection_name=collection,
             max_tokens=max_tokens,
@@ -134,11 +178,19 @@ def ingest_file(  # noqa: PLR0913
             distance=distance,
             device=device,
             batch_size=batch_size,
+            enable_graph=not no_graph,
+            enable_entities=enable_entities,
+            enable_paper_index=enable_paper_index,
         )
 
         _print_config(config, collection, distance)
 
-        result = await pipeline.ingest(file_path)
+        try:
+            result = await pipeline.ingest(file_path)
+        finally:
+            if conn:
+                conn.close()
+
         _print_result(result)
 
         if save_report:
@@ -160,7 +212,7 @@ def ingest_file(  # noqa: PLR0913
 def ingest_dataset(  # noqa: PLR0913
     name: str,
     split: str | None = None,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
@@ -175,6 +227,9 @@ def ingest_dataset(  # noqa: PLR0913
     max_concurrent: int = 1,
     limit: int | None = None,
     no_tracking: bool = False,
+    no_graph: bool = False,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
 ) -> None:
     """
     Ingest all papers from a dataset into the vector store.
@@ -217,7 +272,7 @@ def ingest_dataset(  # noqa: PLR0913
     """
 
     async def _run() -> None:
-        conn = get_connection()
+        conn = get_connection("arxiv")
         try:
             repo = DatasetsRepository(conn)
             papers = repo.get_papers_with_paths(
@@ -253,7 +308,7 @@ def ingest_dataset(  # noqa: PLR0913
         print(f"  max_concurrent:  {max_concurrent}")
         print()
 
-        pipeline, config = await _create_pipeline(
+        pipeline, config, conn = await _create_pipeline(
             embedding_model=embedding_model,
             collection_name=collection,
             max_tokens=max_tokens,
@@ -265,13 +320,20 @@ def ingest_dataset(  # noqa: PLR0913
             on_disk=on_disk,
             device=device,
             batch_size=batch_size,
+            enable_graph=not no_graph,
+            enable_entities=enable_entities,
+            enable_paper_index=enable_paper_index,
         )
 
-        batch_result = await pipeline.ingest_batch(
-            file_paths=paths,
-            continue_on_error=continue_on_error,
-            max_concurrent=max_concurrent,
-        )
+        try:
+            batch_result = await pipeline.ingest_batch(
+                file_paths=paths,
+                continue_on_error=continue_on_error,
+                max_concurrent=max_concurrent,
+            )
+        finally:
+            if conn:
+                conn.close()
 
         _print_batch_result(batch_result, name)
         _save_batch_report(batch_result, name, split)
@@ -312,7 +374,7 @@ def ingest_status(
     """
 
     async def _run() -> None:
-        conn = get_connection()
+        conn = get_connection("arxiv")
         try:
             repo = DatasetsRepository(conn)
             stats = repo.get_stats(name)
@@ -344,7 +406,7 @@ def ingest_status(
 def reingest_failed(  # noqa: PLR0913
     name: str,
     report_path: str | None = None,
-    embedding_model: str = "BAAI/bge-m3",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     collection: str = "documents",
     max_tokens: int = 512,
     no_merge_peers: bool = False,
@@ -353,6 +415,9 @@ def reingest_failed(  # noqa: PLR0913
     distance: str = "cosine",
     device: str | None = None,
     no_tracking: bool = False,
+    no_graph: bool = False,
+    enable_entities: bool = True,
+    enable_paper_index: bool = True,
 ) -> None:
     """
     Re-ingest papers that failed in a previous batch run.
@@ -394,7 +459,7 @@ def reingest_failed(  # noqa: PLR0913
 
         print(f"Re-ingesting {len(failed_paths)} failed papers...")
 
-        pipeline, config = await _create_pipeline(
+        pipeline, config, conn = await _create_pipeline(
             embedding_model=embedding_model,
             collection_name=collection,
             max_tokens=max_tokens,
@@ -403,14 +468,21 @@ def reingest_failed(  # noqa: PLR0913
             filter_empty_chunks=filter_empty,
             distance=distance,
             device=device,
+            enable_graph=not no_graph,
+            enable_entities=enable_entities,
+            enable_paper_index=enable_paper_index,
         )
 
         _print_config(config, collection, distance)
 
-        batch_result = await pipeline.ingest_batch(
-            file_paths=failed_paths,
-            continue_on_error=True,
-        )
+        try:
+            batch_result = await pipeline.ingest_batch(
+                file_paths=failed_paths,
+                continue_on_error=True,
+            )
+        finally:
+            if conn:
+                conn.close()
 
         _print_batch_result(batch_result, f"{name} (retry)")
         _save_batch_report(batch_result, name, split_label="retry")
@@ -528,3 +600,50 @@ def _save_single_report(result: IngestionResult) -> None:
         json.dump(result.to_dict(), f, indent=2, default=str)
 
     print(f"Report saved: {report_path}")
+
+
+def print_ingestion_analytics(
+    dataset_name: str,
+    collection: str = "documents",
+    paper_collection: str | None = None,
+    log_mlflow: bool = False,
+) -> None:
+    """
+    CLI command: compute and print corpus analytics.
+
+    Usage:
+        python main.py ingestion-analytics baseline-v1
+        python main.py ingestion-analytics baseline-v1 --log-mlflow
+    """
+
+    async def _run():
+        conn = get_connection()
+        try:
+            graph_repo = KnowledgeGraphRepository(conn)
+
+            chunk_store = await create_qdrant_store(collection_name=collection)
+            paper_store = None
+            if paper_collection:
+                paper_store = await create_qdrant_store(collection_name=paper_collection)
+
+            analytics = IngestionAnalytics(
+                graph_repo=graph_repo,
+                chunk_store=chunk_store,
+                paper_store=paper_store,
+            )
+
+            report = analytics.compute(dataset_name=dataset_name)
+            print(report.format())
+
+            if log_mlflow:
+                report.log_to_mlflow()
+                print("\nLogged to MLflow.")
+
+            await chunk_store.close()
+            if paper_store:
+                await paper_store.close()
+
+        finally:
+            conn.close()
+
+    asyncio.run(_run())
