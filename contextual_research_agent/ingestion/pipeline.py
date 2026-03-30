@@ -5,12 +5,14 @@ import contextlib
 import re
 import time
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from contextual_research_agent.common import logging
 from contextual_research_agent.ingestion.domain.entities import Chunk, Document
 from contextual_research_agent.ingestion.domain.types import DocumentStatus
 from contextual_research_agent.ingestion.embeddings.hf_embedder import HuggingFaceEmbedder
+from contextual_research_agent.ingestion.embeddings.sparse import SparseEncoder
 from contextual_research_agent.ingestion.extraction.citation_extractor import (
     CitationExtractionResult,
     CitationExtractor,
@@ -55,6 +57,7 @@ class IngestionPipeline:
         section_classifier: SectionClassifier | None = None,
         citation_extractor: CitationExtractor | None = None,
         entity_extractor: EntityExtractor | None = None,
+        sparse_encoder: SparseEncoder | None = None,
         print_summary: bool = True,
     ):
         self._parser = parser
@@ -65,6 +68,7 @@ class IngestionPipeline:
         self._section_classifier = section_classifier or SectionClassifier()
         self._citation_extractor = citation_extractor or CitationExtractor()
         self._entity_extractor = entity_extractor
+        self._sparse_encoder = sparse_encoder
         self._print_summary = print_summary
 
         logger.info("IngestionPipeline initialized")
@@ -143,6 +147,23 @@ class IngestionPipeline:
             },
         )
 
+        formula_not_decoded_count = sum(
+            c.text.count("<!-- formula-not-decoded -->") for c in chunks
+        )
+        equation_chunks_count = sum(1 for c in chunks if c.metadata.get("chunk_type") == "equation")
+        chunks_with_undecoded = sum(
+            1
+            for c in chunks
+            if "<!-- formula-not-decoded -->" in c.text
+            and c.metadata.get("chunk_type") == "equation"
+        )
+
+        for chunk in chunks:
+            chunk.text = chunk.text.replace(
+                "<!-- formula-not-decoded -->",
+                "[mathematical formula — see original PDF]",
+            )
+
         # --- Stage 3: Enrich ---
         t0 = time.perf_counter()
         extraction_metrics = ExtractionMetrics()
@@ -158,12 +179,28 @@ class IngestionPipeline:
             unknown_count = section_dist.get(SectionType.UNKNOWN.value, 0)
             extraction_metrics.unknown_section_rate = unknown_count / len(chunks) if chunks else 0.0
 
+            extraction_metrics.formula_not_decoded_count = formula_not_decoded_count
+            extraction_metrics.formula_total_count = equation_chunks_count
+            extraction_metrics.formula_decode_rate = (
+                1.0 - (chunks_with_undecoded / max(equation_chunks_count, 1))
+                if equation_chunks_count > 0
+                else 1.0
+            )
+
+            logger.info(
+                "Formula quality: %d not decoded / %d equation chunks (%.1f%% decode rate)",
+                formula_not_decoded_count,
+                equation_chunks_count,
+                extraction_metrics.formula_decode_rate * 100,
+            )
+
             logger.info(
                 "Section classification complete",
                 extra={
                     "doc_id": document.id,
                     "distribution": section_dist,
                     "unknown_rate": f"{extraction_metrics.unknown_section_rate:.1%}",
+                    "formula_decode_rate": f"{extraction_metrics.formula_decode_rate:.1%}",
                 },
             )
 
@@ -241,7 +278,6 @@ class IngestionPipeline:
 
         metrics.latency.embed_ms = (time.perf_counter() - t0) * 1000
 
-        # Retrieve embedding metrics from embedder's log (last entry)
         emb_log = self._embedder.get_metrics_log()
         if emb_log:
             metrics.embedding = emb_log[-1]
@@ -263,6 +299,29 @@ class IngestionPipeline:
                 "ms": round(metrics.latency.embed_ms),
             },
         )
+
+        sparse_vectors: list[dict[str, Any]] | None = None
+        if self._sparse_encoder:
+            t0 = time.perf_counter()
+            try:
+                sparse_vectors = await self._sparse_encoder.encode_texts_async(texts)
+                metrics.latency.sparse_embed_ms = (time.perf_counter() - t0) * 1000
+                logger.info(
+                    "Sparse encoding complete",
+                    extra={
+                        "doc_id": document.id,
+                        "num_vectors": len(sparse_vectors),
+                        "ms": round(metrics.latency.sparse_embed_ms),
+                    },
+                )
+            except Exception as e:
+                metrics.latency.sparse_embed_ms = (time.perf_counter() - t0) * 1000
+                logger.warning(
+                    "Sparse encoding failed (non-fatal): %s",
+                    e,
+                    extra={"doc_id": document.id},
+                )
+                sparse_vectors = None
 
         if self._paper_store and document.abstract:
             t0 = time.perf_counter()
@@ -300,7 +359,9 @@ class IngestionPipeline:
         # --- Stage 5: Index ---
         t0 = time.perf_counter()
         try:
-            count, store_metrics = await self._store.add_chunks(chunks, embeddings)
+            count, store_metrics = await self._store.add_chunks(
+                chunks, embeddings, sparse_vectors=sparse_vectors
+            )
         except Exception as e:
             logger.exception("Index stage failed", extra={"doc_id": document.id})
             return self._failed_result(run_id, file_path, f"index_error: {e}", metrics, document)
@@ -319,9 +380,10 @@ class IngestionPipeline:
                         extra={"doc_id": document.id, "citation_edges": len(citation_result.edges)},
                     )
                 except Exception as e:
-                    logger.exception(
-                        "Citation storage failed (non-fatal)", extra={"doc_id": document.id}
-                    )
+                    logger.exception("Citation storage failed (non-fatal)")
+                    if self._graph_repo and hasattr(self._graph_repo, "_conn"):
+                        with contextlib.suppress(Exception):
+                            self._graph_repo._conn.rollback()
 
             if entity_result and entity_result.edges:
                 try:

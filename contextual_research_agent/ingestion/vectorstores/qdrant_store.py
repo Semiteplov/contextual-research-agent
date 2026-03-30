@@ -99,7 +99,6 @@ async def _retry_async(
         try:
             return await asyncio.to_thread(fn)
         except UnexpectedResponse:
-            # Client-side errors (4xx) — don't retry
             raise
         except Exception as e:
             last_exc = e
@@ -123,7 +122,6 @@ _DISTANCE_MAP = {
     "dot": models.Distance.DOT,
 }
 
-# Payload fields to index for filtered search
 _PAYLOAD_INDEXES: list[tuple[str, models.PayloadSchemaType]] = [
     ("document_id", models.PayloadSchemaType.KEYWORD),
     ("chunk_id", models.PayloadSchemaType.KEYWORD),
@@ -143,28 +141,33 @@ class QdrantStore:
     blocking the event loop during collection initialization.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         client: QdrantClient,
         collection_name: str,
         embedding_dim: int,
         distance: str = "cosine",
+        sparse_vector_name: str | None = None,
+        dense_vector_name: str | None = None,
     ):
         self._client = client
         self.collection_name = collection_name
         self.embedding_dim = embedding_dim
         self.distance = distance
+        self._sparse_name = sparse_vector_name
+        self._dense_name = dense_vector_name
 
-        # Accumulated metrics (optional, for pipeline-level aggregation)
         self._metrics_log: list[StoreOperationMetrics] = []
 
     @classmethod
-    async def create(
+    async def create(  # noqa: PLR0913
         cls,
         collection_name: str = "documents",
         embedding_dim: int = 1024,
         distance: str = "cosine",
         on_disk: bool = False,
+        sparse_vector_name: str | None = None,
+        dense_vector_name: str | None = None,
     ):
         """
         Async factory: creates client, ensures collection exists.
@@ -175,11 +178,27 @@ class QdrantStore:
         settings = get_settings()
         client = QdrantClient(host=settings.qdrant.host, port=settings.qdrant.port)
 
+        detected_sparse = sparse_vector_name
+        detected_dense = dense_vector_name
+
+        try:
+            info = client.get_collection(collection_name)
+            sparse_cfg = info.config.params.sparse_vectors
+            if sparse_cfg and len(sparse_cfg) > 0:
+                detected_sparse = detected_sparse or next(iter(sparse_cfg))
+                vectors_cfg = info.config.params.vectors
+                if isinstance(vectors_cfg, dict) and len(vectors_cfg) > 0:
+                    detected_dense = detected_dense or next(iter(vectors_cfg))
+        except Exception:
+            pass
+
         instance = cls(
             client=client,
             collection_name=collection_name,
             embedding_dim=embedding_dim,
             distance=distance,
+            sparse_vector_name=detected_sparse,
+            dense_vector_name=detected_dense,
         )
 
         await instance._ensure_collection(on_disk=on_disk)
@@ -196,23 +215,51 @@ class QdrantStore:
             except (UnexpectedResponse, Exception):
                 pass
 
-            self._client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=self.embedding_dim,
-                    distance=_DISTANCE_MAP.get(self.distance, models.Distance.COSINE),
-                    on_disk=on_disk,
-                ),
-                optimizers_config=models.OptimizersConfigDiff(
-                    indexing_threshold=20000,
-                ),
-            )
-            logger.info(
-                "Created collection: %s (dim=%d, distance=%s)",
-                self.collection_name,
-                self.embedding_dim,
-                self.distance,
-            )
+            qdrant_distance = _DISTANCE_MAP.get(self.distance, models.Distance.COSINE)
+
+            if self._sparse_name:
+                vectors_config = {
+                    (self._dense_name or "dense"): models.VectorParams(
+                        size=self.embedding_dim,
+                        distance=qdrant_distance,
+                        on_disk=on_disk,
+                    ),
+                }
+                sparse_config = {
+                    self._sparse_name: models.SparseVectorParams(),
+                }
+                self._client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=vectors_config,
+                    sparse_vectors_config=sparse_config,
+                    optimizers_config=models.OptimizersConfigDiff(
+                        indexing_threshold=20000,
+                    ),
+                )
+                logger.info(
+                    "Created hybrid collection: %s (dim=%d, sparse=%s)",
+                    self.collection_name,
+                    self.embedding_dim,
+                    self._sparse_name,
+                )
+            else:
+                self._client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=self.embedding_dim,
+                        distance=qdrant_distance,
+                        on_disk=on_disk,
+                    ),
+                    optimizers_config=models.OptimizersConfigDiff(
+                        indexing_threshold=20000,
+                    ),
+                )
+                logger.info(
+                    "Created collection: %s (dim=%d, distance=%s)",
+                    self.collection_name,
+                    self.embedding_dim,
+                    self.distance,
+                )
 
         await asyncio.to_thread(_check_and_create)
         await self._ensure_payload_indexes()
@@ -237,6 +284,7 @@ class QdrantStore:
         self,
         chunks: Sequence[Chunk],
         embeddings: Sequence[list[float]],
+        sparse_vectors: Sequence[dict[str, Any]] | None = None,
         batch_size: int = 128,
     ) -> tuple[int, StoreOperationMetrics]:
         """
@@ -249,6 +297,11 @@ class QdrantStore:
                 f"Chunks ({len(chunks)}) and embeddings ({len(embeddings)}) count mismatch"
             )
 
+        if sparse_vectors is not None and len(sparse_vectors) != len(chunks):
+            raise ValueError(
+                f"Chunks ({len(chunks)}) and sparse_vectors ({len(sparse_vectors)}) count mismatch"
+            )
+
         if not chunks:
             metrics = StoreOperationMetrics(
                 operation="upsert",
@@ -259,7 +312,6 @@ class QdrantStore:
             )
             return 0, metrics
 
-        # Validate dimensions
         for i, (chunk, vec) in enumerate(zip(chunks, embeddings, strict=True)):
             if len(vec) != self.embedding_dim:
                 raise ValueError(
@@ -267,15 +319,28 @@ class QdrantStore:
                     f"got {len(vec)}, expected {self.embedding_dim}"
                 )
 
-        # Build points
-        points = [
-            models.PointStruct(
-                id=_chunk_id_to_point_id(chunk.id),
-                vector=vec,
-                payload=_chunk_to_payload(chunk),
-            )
-            for chunk, vec in zip(chunks, embeddings, strict=True)
-        ]
+        points: list[models.PointStruct] = []
+        for i, (chunk, dense_vec) in enumerate(zip(chunks, embeddings, strict=True)):
+            point_id = _chunk_id_to_point_id(chunk.id)
+            payload = _chunk_to_payload(chunk)
+
+            if self._sparse_name and sparse_vectors is not None:
+                sv = sparse_vectors[i]
+                vector: dict[str, models.Vector | models.SparseVector] = {
+                    (self._dense_name or "dense"): dense_vec,
+                    self._sparse_name: models.SparseVector(
+                        indices=sv["indices"],
+                        values=sv["values"],
+                    ),
+                }
+                points.append(models.PointStruct(id=point_id, vector=vector, payload=payload))
+            elif self._sparse_name:
+                named_vector: dict[str, models.Vector] = {
+                    (self._dense_name or "dense"): dense_vec,
+                }
+                points.append(models.PointStruct(id=point_id, vector=named_vector, payload=payload))
+            else:
+                points.append(models.PointStruct(id=point_id, vector=dense_vec, payload=payload))
 
         t0 = time.monotonic()
         error_msg = None
@@ -349,17 +414,21 @@ class QdrantStore:
         success = True
         results: list[tuple[Chunk, float]] = []
 
+        using = (self._dense_name or "dense") if self._sparse_name else None
         try:
 
             def _search():
-                return self._client.query_points(
-                    collection_name=self.collection_name,
-                    query=query_embedding,
-                    limit=top_k,
-                    score_threshold=score_threshold,
-                    query_filter=qdrant_filter,
-                    with_payload=True,
-                )
+                kwargs: dict[str, Any] = {
+                    "collection_name": self.collection_name,
+                    "query": query_embedding,
+                    "limit": top_k,
+                    "score_threshold": score_threshold,
+                    "query_filter": qdrant_filter,
+                    "with_payload": True,
+                }
+                if using:
+                    kwargs["using"] = using
+                return self._client.query_points(**kwargs)
 
             response = await _retry_async(
                 _search,
@@ -398,6 +467,166 @@ class QdrantStore:
                     if score_threshold is not None
                     else len(scores)
                 ),
+            )
+            self._metrics_log.append(search_metrics)
+
+        return results, search_metrics
+
+    async def search_sparse(
+        self,
+        sparse_vector: dict[str, Any],
+        top_k: int = 10,
+        filters: dict[str, Any] | None = None,
+    ) -> tuple[list[tuple[Chunk, float]], SearchMetrics]:
+        """
+        Sparse vector search.
+
+        Args:
+            sparse_vector: {"indices": list[int], "values": list[float]}
+        """
+        if not self._sparse_name:
+            raise RuntimeError("search_sparse requires a hybrid collection (sparse_vector_name)")
+
+        qdrant_filter = _build_filter(filters) if filters else None
+
+        t0 = time.monotonic()
+        error_msg = None
+        success = True
+        results: list[tuple[Chunk, float]] = []
+
+        try:
+            query_vec = models.SparseVector(
+                indices=sparse_vector["indices"],
+                values=sparse_vector["values"],
+            )
+
+            def _search():
+                return self._client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vec,
+                    using=self._sparse_name,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                    with_payload=True,
+                )
+
+            response = await _retry_async(
+                _search,
+                operation_name=f"search_sparse(top_k={top_k})",
+            )
+
+            for point in response.points:
+                payload = point.payload or {}
+                score = float(point.score) if point.score is not None else 0.0
+                results.append((_payload_to_chunk(payload), score))
+
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            raise
+
+        finally:
+            duration = (time.monotonic() - t0) * 1000
+            scores = [s for _, s in results]
+            search_metrics = SearchMetrics(
+                operation="search_sparse",
+                collection=self.collection_name,
+                duration_ms=duration,
+                num_items=len(results),
+                success=success,
+                error=error_msg,
+                top_k_requested=top_k,
+                results_returned=len(results),
+                min_score=min(scores) if scores else 0.0,
+                max_score=max(scores) if scores else 0.0,
+                mean_score=sum(scores) / len(scores) if scores else 0.0,
+                above_threshold_count=len(scores),
+            )
+            self._metrics_log.append(search_metrics)
+
+        return results, search_metrics
+
+    async def search_hybrid(
+        self,
+        query_embedding: list[float],
+        sparse_vector: dict[str, Any],
+        top_k: int = 10,
+        filters: dict[str, Any] | None = None,
+        prefetch_limit: int = 50,
+    ) -> tuple[list[tuple[Chunk, float]], SearchMetrics]:
+        """
+        Hybrid search via Qdrant prefetch + RRF fusion.
+        """
+        if not self._sparse_name:
+            raise RuntimeError("search_hybrid requires a hybrid collection")
+
+        qdrant_filter = _build_filter(filters) if filters else None
+        dense_name = self._dense_name or "dense"
+
+        t0 = time.monotonic()
+        error_msg = None
+        success = True
+        results: list[tuple[Chunk, float]] = []
+
+        try:
+            sparse_qvec = models.SparseVector(
+                indices=sparse_vector["indices"],
+                values=sparse_vector["values"],
+            )
+
+            def _search():
+                return self._client.query_points(
+                    collection_name=self.collection_name,
+                    prefetch=[
+                        models.Prefetch(
+                            query=query_embedding,
+                            using=dense_name,
+                            limit=prefetch_limit,
+                            filter=qdrant_filter,
+                        ),
+                        models.Prefetch(
+                            query=sparse_qvec,
+                            using=self._sparse_name,
+                            limit=prefetch_limit,
+                            filter=qdrant_filter,
+                        ),
+                    ],
+                    query=models.FusionQuery(fusion=models.Fusion.RRF),
+                    limit=top_k,
+                    with_payload=True,
+                )
+
+            response = await _retry_async(
+                _search,
+                operation_name=f"search_hybrid(top_k={top_k})",
+            )
+
+            for point in response.points:
+                payload = point.payload or {}
+                score = float(point.score) if point.score is not None else 0.0
+                results.append((_payload_to_chunk(payload), score))
+
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            raise
+
+        finally:
+            duration = (time.monotonic() - t0) * 1000
+            scores = [s for _, s in results]
+            search_metrics = SearchMetrics(
+                operation="search_hybrid",
+                collection=self.collection_name,
+                duration_ms=duration,
+                num_items=len(results),
+                success=success,
+                error=error_msg,
+                top_k_requested=top_k,
+                results_returned=len(results),
+                min_score=min(scores) if scores else 0.0,
+                max_score=max(scores) if scores else 0.0,
+                mean_score=sum(scores) / len(scores) if scores else 0.0,
+                above_threshold_count=len(scores),
             )
             self._metrics_log.append(search_metrics)
 
@@ -600,7 +829,6 @@ def _build_filter(filters: dict[str, Any]) -> models.Filter | None:
             continue
 
         if isinstance(value, bool):
-            # bool before int — Python's bool is subclass of int
             conditions.append(
                 models.FieldCondition(
                     key=key,
@@ -639,21 +867,19 @@ def _build_filter(filters: dict[str, Any]) -> models.Filter | None:
     return models.Filter(must=conditions) if conditions else None
 
 
-async def create_qdrant_store(
+async def create_qdrant_store(  # noqa: PLR0913
     collection_name: str = "documents",
     embedding_dim: int = 1024,
     distance: str = "cosine",
     on_disk: bool = False,
+    sparse_vector_name: str | None = None,
+    dense_vector_name: str | None = None,
 ) -> QdrantStore:
-    """
-    Async factory for QdrantStore.
-
-    Usage:
-        store = await create_qdrant_store(collection_name="papers", embedding_dim=1024)
-    """
     return await QdrantStore.create(
         collection_name=collection_name,
         embedding_dim=embedding_dim,
         distance=distance,
         on_disk=on_disk,
+        sparse_vector_name=sparse_vector_name,
+        dense_vector_name=dense_vector_name,
     )

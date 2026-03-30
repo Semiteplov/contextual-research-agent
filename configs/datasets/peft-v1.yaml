@@ -1,0 +1,24 @@
+name: peft-v1
+description: PEFT methods corpus for retrieval evaluation
+version: 1
+purpose: evaluation
+created_at: '2026-03-17T19:58:19.949526+00:00'
+selection_criteria:
+  categories: []
+  min_date: ''
+  keywords: null
+  total_requested: 38
+splits:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  random_seed: 42
+statistics:
+  total_papers: 32
+  downloaded_papers: 32
+  train_count: 25
+  val_count: 3
+  test_count: 4
+storage:
+  s3_bucket: rag-storage
+  s3_prefix: arxiv/papers

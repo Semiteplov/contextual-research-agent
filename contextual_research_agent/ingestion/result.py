@@ -20,6 +20,7 @@ class StageLatency:
     enrich_ms: float = 0.0  # section classify + citation extract
     entity_extract_ms: float = 0.0  # LLM entity extraction
     embed_ms: float = 0.0  # chunk embeddings
+    sparse_embed_ms: float = 0.0
     paper_embed_ms: float = 0.0  # paper-level embedding
     index_ms: float = 0.0
     graph_store_ms: float = 0.0
@@ -44,6 +45,7 @@ class StageLatency:
             "enrich_ms": round(self.enrich_ms, 1),
             "entity_extract_ms": round(self.entity_extract_ms, 1),
             "embed_ms": round(self.embed_ms, 1),
+            "sparse_embed_ms": round(self.sparse_embed_ms, 1),
             "paper_embed_ms": round(self.paper_embed_ms, 1),
             "index_ms": round(self.index_ms, 1),
             "graph_store_ms": round(self.graph_store_ms, 1),
@@ -60,6 +62,11 @@ class ExtractionMetrics:
     section_type_distribution: dict[str, int] = field(default_factory=dict)
     unknown_section_rate: float = 0.0
 
+    # Formula quality
+    formula_not_decoded_count: int = 0
+    formula_total_count: int = 0
+    formula_decode_rate: float = 0.0
+
     # Citation extraction
     citation_extract_ms: float = 0.0
     total_references: int = 0
@@ -75,6 +82,9 @@ class ExtractionMetrics:
             "total_references": self.total_references,
             "resolved_references": self.resolved_references,
             "resolution_rate": round(self.resolution_rate, 3),
+            "formula_not_decoded_count": self.formula_not_decoded_count,
+            "formula_total_count": self.formula_total_count,
+            "formula_decode_rate": round(self.formula_decode_rate, 3),
         }
 
 
