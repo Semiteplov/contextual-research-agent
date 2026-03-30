@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Protocol
+from typing import Any
 
 from qdrant_client import models
 
 from contextual_research_agent.common.logging import get_logger
+from contextual_research_agent.ingestion.embeddings.sparse import SparseEncoder
 from contextual_research_agent.ingestion.vectorstores.qdrant_store import (
     _build_filter,
     _payload_to_chunk,
@@ -20,14 +21,6 @@ from contextual_research_agent.retrieval.types import (
 )
 
 logger = get_logger(__name__)
-
-
-class SparseEncoder(Protocol):
-    """Protocol for sparse query encoding."""
-
-    def encode_query(self, query: str) -> dict[int, float]:
-        """Encode query to sparse vector {token_id: weight}."""
-        ...
 
 
 class QdrantSparseBackend:
@@ -65,8 +58,8 @@ class QdrantSparseBackend:
         sparse_vector = self._encoder.encode_query(query)
 
         query_vector = models.SparseVector(
-            indices=list(sparse_vector.keys()),
-            values=list(sparse_vector.values()),
+            indices=sparse_vector["indices"],
+            values=sparse_vector["values"],
         )
 
         qdrant_filter = None

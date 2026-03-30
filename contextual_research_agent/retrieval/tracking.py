@@ -106,7 +106,9 @@ class RetrievalTracker:
     ) -> str:
         with mlflow.start_run(run_name=run_name) as run:
             mlflow.log_params(config.to_mlflow_params())
-            mlflow.log_metrics(ir_metrics.to_mlflow_metrics())
+
+            if ir_metrics and ir_metrics.num_relevant > 0:
+                mlflow.log_metrics(ir_metrics.to_mlflow_metrics())
 
             if operational:
                 mlflow.log_metrics(operational.to_mlflow_metrics())

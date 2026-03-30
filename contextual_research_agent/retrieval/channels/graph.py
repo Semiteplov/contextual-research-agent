@@ -37,11 +37,14 @@ class CitationGraphChannel(RetrievalChannel):
         vector_store: QdrantStore,
         embedder: Embedder,
         config: GraphChannelConfig | None = None,
+        arxiv_to_doc_id: dict[str, str] | None = None,
     ):
         self._graph = graph_repo
         self._store = vector_store
         self._embedder = embedder
         self._config = config or GraphChannelConfig()
+        self._arxiv_to_doc_id = arxiv_to_doc_id or {}
+        self._doc_id_to_arxiv = {v: k for k, v in self._arxiv_to_doc_id.items()}
 
     @property
     def name(self) -> ChannelName:
@@ -84,6 +87,12 @@ class CitationGraphChannel(RetrievalChannel):
                 max_papers=self._config.max_papers,
             )
 
+            logger.info(
+                "Citation debug: seeds=%s, connected=%s, arxiv_map_size=%d",
+                seed_doc_ids[:3],
+                connected_paper_ids[:5],
+                len(self._arxiv_to_doc_id),
+            )
             if not connected_paper_ids:
                 return self._empty_result(time.perf_counter() - t0)
 
@@ -134,6 +143,9 @@ class CitationGraphChannel(RetrievalChannel):
         if not seed_paper_ids:
             return []
 
+        seed_arxiv_ids = [self._doc_id_to_arxiv.get(did, did) for did in seed_paper_ids]
+        logger.info("Seed mapping: %s → %s", seed_paper_ids[:3], seed_arxiv_ids[:3])
+
         try:
             conn = self._graph._conn
             with conn.cursor() as cur:
@@ -141,7 +153,6 @@ class CitationGraphChannel(RetrievalChannel):
                 cur.execute(
                     f"""
                     WITH RECURSIVE citation_walk AS (
-                        -- Depth 0: direct connections
                         SELECT cited_paper_id AS paper_id, 1 AS depth
                         FROM citation_edges
                         WHERE citing_paper_id IN ({placeholders})
@@ -154,7 +165,6 @@ class CitationGraphChannel(RetrievalChannel):
 
                         UNION ALL
 
-                        -- Depth > 1: recursive step
                         SELECT ce.cited_paper_id, cw.depth + 1
                         FROM citation_walk cw
                         JOIN citation_edges ce ON ce.citing_paper_id = cw.paper_id
@@ -167,10 +177,22 @@ class CitationGraphChannel(RetrievalChannel):
                     ORDER BY min_depth, paper_id
                     LIMIT %s
                     """,
-                    seed_paper_ids + seed_paper_ids + [depth] + seed_paper_ids + [max_papers],
+                    seed_arxiv_ids + seed_arxiv_ids + [depth] + seed_arxiv_ids + [max_papers],
                 )
                 rows = cur.fetchall()
-                return [row[0] for row in rows]
+                all_connected = [row[0] for row in rows]
+
+                in_corpus = [pid for pid in all_connected if pid in self._arxiv_to_doc_id]
+
+                logger.info(
+                    "Citation walk: %d seeds → %d connected → %d in corpus",
+                    len(seed_arxiv_ids),
+                    len(all_connected),
+                    len(in_corpus),
+                )
+                logger.info("Connected arxiv_ids: %s", all_connected[:10])
+                logger.info("Corpus arxiv_ids: %s", list(self._arxiv_to_doc_id.keys())[:10])
+                return in_corpus
 
         except Exception as e:
             logger.warning("Citation walk failed: %s", e)
@@ -187,10 +209,12 @@ class CitationGraphChannel(RetrievalChannel):
         candidates: list[ScoredCandidate] = []
 
         for paper_id in paper_ids:
+            doc_id = self._arxiv_to_doc_id.get(paper_id, paper_id)
+
             results, _ = await self._store.search(
                 query_embedding=query_embedding,
                 top_k=chunks_per_paper,
-                filters={"document_id": paper_id},
+                filters={"document_id": doc_id},
             )
 
             decay = 0.8
@@ -243,11 +267,13 @@ class EntityGraphChannel(RetrievalChannel):
         vector_store: QdrantStore,
         embedder: Embedder,
         config: GraphChannelConfig | None = None,
+        arxiv_to_doc_id: dict[str, str] | None = None,
     ):
         self._graph = graph_repo
         self._store = vector_store
         self._embedder = embedder
         self._config = config or GraphChannelConfig()
+        self._arxiv_to_doc_id = arxiv_to_doc_id or {}
 
     @property
     def name(self) -> ChannelName:
@@ -295,10 +321,11 @@ class EntityGraphChannel(RetrievalChannel):
 
             candidates: list[ScoredCandidate] = []
             for paper_id in paper_ids:
+                doc_id = self._arxiv_to_doc_id.get(paper_id, paper_id)
                 results, _ = await self._store.search(
                     query_embedding=query_embedding,
                     top_k=self._config.chunks_per_paper,
-                    filters={"document_id": paper_id},
+                    filters={"document_id": doc_id},
                 )
 
                 for chunk, score in results:

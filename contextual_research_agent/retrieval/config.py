@@ -60,9 +60,9 @@ class FusionConfig:
     channel_weights: dict[str, float] = field(
         default_factory=lambda: {
             ChannelName.DENSE.value: 1.0,
-            ChannelName.SPARSE.value: 1.0,
+            ChannelName.SPARSE.value: 0.3,
             ChannelName.GRAPH_CITATION.value: 0.7,
-            ChannelName.GRAPH_ENTITY.value: 0.7,
+            ChannelName.GRAPH_ENTITY.value: 0.5,
             ChannelName.PAPER_LEVEL.value: 0.5,
         }
     )
@@ -74,7 +74,7 @@ class RerankConfig:
 
     enabled: bool = True
     model: str = "BAAI/bge-reranker-v2-m3"
-    top_k: int = 10
+    top_k: int = 20
     batch_size: int = 16
     device: str | None = None
     max_length: int = 512

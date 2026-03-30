@@ -1,0 +1,79 @@
+[
+    {
+      "group": "Core Low-Rank Adaptation (LoRA) & Downstream",
+      "core_paper": { "название": "LoRA: Low-Rank Adaptation of Large Language Models", "arxivId": "2106.09685" },
+      "downstream_papers": [
+        { "название": "ReLoRA: High-Rank Training Through Low-Rank Updates", "arxivId": "2307.05695" },
+        { "название": "VeRA: Vector-based Random Matrix Adaptation", "arxivId": "2310.11453" },
+        { "название": "S-LoRA: Serving Thousands of Concurrent LoRA Adapters", "arxivId": "2311.03285" },
+        { "название": "LongLoRA: Efficient Fine-tuning of Long-Context Large Language Models", "arxivId": "2309.12307" },
+        { "название": "PiSSA: Principal Singular Values and Singular Vectors Adaptation of Large Language Models", "arxivId": "2404.02948" },
+        { "название": "MoRA: High-Rank Update with Reduced Parameter Sharing", "arxivId": "2405.12130" }
+      ],
+      "citations": "LoRA (2106.09685) является наиболее цитируемым узлом. PiSSA и MoRA (2024) цитируют LoRA как базовую архитектуру, предлагая инициализацию через главные компоненты вместо случайных матриц."
+    },
+    {
+      "group": "Quantized PEFT (QLoRA) & Applications",
+      "core_paper": { "название": "QLoRA: Efficient Finetuning of Quantized LLMs", "arxivId": "2305.14314" },
+      "downstream_papers": [
+        { "название": "LoftQ: LoRA-Fine-Tuning-Aware Quantization for Large Language Models", "arxivId": "2310.08659" },
+        { "название": "QA-LoRA: Quantization-Aware Low-Rank Adaptation of Large Language Models", "arxivId": "2309.14717" },
+        { "название": "Bioalignment: Measuring and Improving LLM Disposition Toward Biological Systems", "arxivId": "2603.09154" },
+        { "название": "FALQON: Accelerating LoRA Fine-tuning with Low-Bit Floating-Point Arithmetic", "arxivId": "2510.24061" }
+      ],
+      "citations": "QLoRA объединяет квантование и низкоранговые обновления. Все производные статьи ссылаются на 2305.14314 для обоснования возможности обучения LLM на одной GPU."
+    },
+    {
+      "group": "Decomposed & Synergistic Adaptation (DoRA)",
+      "core_paper": { "название": "DoRA: Weight-Decomposed Low-Rank Adaptation", "arxivId": "2402.09353" },
+      "downstream_papers": [
+        { "название": "TemporalDoRA: Temporal PEFT for Robust Surgical Video Question Answering", "arxivId": "2603.09696" },
+        { "название": "D2-LoRA: A Synergistic Approach to Differential and Directional Low-Rank Adaptation", "arxivId": "2602.14728" },
+        { "название": "WaDi: Weight Direction-aware Distillation for One-step Image Synthesis", "arxivId": "2603.08258" }
+      ],
+      "citations": "DoRA цитирует LoRA и QLoRA, вводя разделение на магнитуду и направление. D2-LoRA (2026) напрямую развивает математический аппарат DoRA."
+    },
+    {
+      "group": "Adaptive & Dynamic Rank Allocation (AdaLoRA)",
+      "core_paper": { "название": "AdaLoRA: Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning", "arxivId": "2303.10512" },
+      "downstream_papers": [
+        { "название": "FlexLoRA: Entropy-Guided Flexible Low-Rank Adaptation", "arxivId": "2601.22905" },
+      ],
+      "citations": "AdaLoRA (2303.10512) цитирует LoRA. FlexLoRA и IGU-LoRA (2025-2026) используют предложенную в AdaLoRA метрику важности (SVD-based) для динамического изменения ранга."
+    },
+    {
+      "group": "Prompt & Prefix Engineering",
+      "core_papers": [
+        { "название": "Prefix-Tuning: Optimizing Continuous Prompts for Generation", "arxivId": "2101.00190" },
+        { "название": "The Power of Scale for Parameter-Efficient Prompt Tuning", "arxivId": "2104.08691" },
+        { "название": "P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally", "arxivId": "2203.12277" },
+        { "название": "Towards a Unified View of Parameter-Efficient Transfer Learning", "arxivId": "2110.04366" }
+      ],
+      "downstream_papers": [
+        { "название": "Towards Dynamic Dense Retrieval with Routing Strategy", "arxivId": "2602.22547" },
+        { "название": "PTS-SNN: Prompt-Tuned Spiking Neural Networks for Speech Emotion Recognition", "arxivId": "2602.08240" },
+        { "название": "SeGDP: Source-free Cross-domain Few-shot Learning via Semantic Guided Prompting", "arxivId": "2511.17979" },
+      ],
+      "citations": "Статья He et al. (2110.04366) является мостом, доказывающим, что Prefix-Tuning математически эквивалентен адаптерам. Новые работы (2025-2026) цитируют эту связь для построения гибридных систем (MuxTune)."
+    },
+    {
+      "group": "Foundational Adapters",
+      "core_papers": [
+        { "название": "Parameter-Efficient Transfer Learning for NLP (Houlsby Adapter)", "arxivId": "1902.00751" },
+        { "название": "AdapterFusion: Non-Destructive Task Composition for Transfer Learning", "arxivId": "2005.00247" },
+        { "название": "LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention", "arxivId": "2303.16199" }
+      ],
+      "citations": "Houlsby (1902.00751) — это 'нулевой пациент' PEFT. Его цитируют абсолютно все последующие работы (LoRA, Prefix-Tuning) как первое доказательство эффективности обучения <1% параметров."
+    },
+    {
+      "group": "Surveys (Landscape of PEFT)",
+      "papers": [
+        { "название": "Parameter-Efficient Fine-Tuning for Large Models: A Comprehensive Survey", "arxivId": "2403.14608" },
+        { "название": "PEFT A2Z: Parameter-Efficient Fine-Tuning Survey for Large Language and Vision Models", "arxivId": "2504.14117" },
+        { "название": "Scaling Down to Scale Up: A Guide to Parameter-Efficient Fine-Tuning", "arxivId": "2303.15647" },
+        { "название": "LLM Post-Training: A Deep Dive into Reasoning Large Language Models", "arxivId": "2502.21321" }
+      ],
+      "citations": "Обзоры цитируют все Core-статьи. Новейший обзор 2502.21321 уже включает в себя Tier-2 работы 2024 года, связывая PEFT с процессами выравнивания (alignment)."
+    }
+  ]
+  

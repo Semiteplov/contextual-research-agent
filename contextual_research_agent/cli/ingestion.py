@@ -244,6 +244,8 @@ def ingest_dataset(  # noqa: PLR0913
     no_graph: bool = False,
     enable_entities: bool = True,
     enable_paper_index: bool = True,
+    enable_sparse: bool = False,
+    sparse_model: str = "Qdrant/bm25",
 ) -> None:
     """
     Ingest all papers from a dataset into the vector store.
@@ -337,6 +339,8 @@ def ingest_dataset(  # noqa: PLR0913
             enable_graph=not no_graph,
             enable_entities=enable_entities,
             enable_paper_index=enable_paper_index,
+            enable_sparse=enable_sparse,
+            sparse_model=sparse_model,
         )
 
         try:
@@ -631,7 +635,7 @@ def print_ingestion_analytics(
     """
 
     async def _run():
-        conn = get_connection()
+        conn = get_connection("arxiv")
         try:
             graph_repo = KnowledgeGraphRepository(conn)
 

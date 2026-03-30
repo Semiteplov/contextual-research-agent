@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -249,3 +251,177 @@ def resume_download(
     print(f"  Downloaded: {stats.downloaded}")
     print(f"  Skipped:    {stats.skipped}")
     print(f"  Failed:     {stats.failed}")
+
+
+def create_dataset_from_json(  # noqa: PLR0913
+    name: str,
+    json_path: str,
+    description: str | None = None,
+    purpose: str = "evaluation",
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+    random_seed: int = 42,
+    no_download: bool = False,
+    config_dir: str = "configs/datasets",
+    overwrite: bool = False,
+    skip_missing: bool = True,
+) -> None:
+    """
+    Create dataset from a curated JSON file with explicit arxiv_ids.
+
+    Unlike create-dataset (which queries PostgreSQL by categories/keywords),
+    this command takes a pre-selected list of papers grouped by topic.
+
+    Args:
+        name: Unique dataset name (e.g., 'peft-v1').
+        json_path: Path to JSON file with paper groups.
+        description: Human-readable description.
+        purpose: Dataset purpose.
+        train_ratio: Training split ratio.
+        val_ratio: Validation split ratio.
+        test_ratio: Test split ratio.
+        random_seed: Random seed for reproducible splits.
+        no_download: If True, skip PDF download.
+        config_dir: Directory for config YAML files.
+        overwrite: Overwrite existing dataset.
+        skip_missing: If True, skip papers not found in arxiv_papers_metadata.
+            If False, raise error on missing papers.
+
+    JSON format:
+        [
+          {
+            "group": "Core LoRA",
+            "core_paper": {"название": "...", "arxivId": "2106.09685"},
+            "downstream_papers": [
+              {"название": "...", "arxivId": "2307.05695"},
+              ...
+            ]
+          },
+          {
+            "group": "Surveys",
+            "papers": [
+              {"название": "...", "arxivId": "2403.14608"},
+              ...
+            ]
+          }
+        ]
+    """
+    papers_info = _parse_curated_json(json_path)
+    all_arxiv_ids = [p["arxiv_id"] for p in papers_info]
+    unique_ids = list(dict.fromkeys(all_arxiv_ids))
+
+    print(f"\nParsed {len(unique_ids)} unique papers from {json_path}")
+    print(f"Groups: {len(set(p['group'] for p in papers_info))}")
+
+    groups: dict[str, list[dict]] = {}
+    for p in papers_info:
+        groups.setdefault(p["group"], []).append(p)
+
+    for group_name, group_papers in groups.items():
+        core = [p for p in group_papers if p["tier"] == "core"]
+        downstream = [p for p in group_papers if p["tier"] == "downstream"]
+        survey = [p for p in group_papers if p["tier"] == "survey"]
+        parts = []
+        if core:
+            parts.append(f"{len(core)} core")
+        if downstream:
+            parts.append(f"{len(downstream)} downstream")
+        if survey:
+            parts.append(f"{len(survey)} survey")
+        print(f"  {group_name}: {', '.join(parts)}")
+
+    service = DatasetService()
+
+    try:
+        dataset, stats, config_path = service.create_dataset_from_ids(
+            name=name,
+            arxiv_ids=unique_ids,
+            description=description or f"Curated dataset: {name} ({len(unique_ids)} papers)",
+            purpose=purpose,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            random_seed=random_seed,
+            download_pdfs=not no_download,
+            config_output_dir=config_dir,
+            overwrite=overwrite,
+            skip_missing=skip_missing,
+            metadata={
+                "source_json": json_path,
+                "groups": {g: [p["arxiv_id"] for p in ps] for g, ps in groups.items()},
+                "paper_tiers": {p["arxiv_id"]: p["tier"] for p in papers_info},
+            },
+        )
+    except Exception as e:
+        print(f"\nError creating dataset: {e}")
+        return
+
+    print("\n" + "=" * 60)
+    print(f"Dataset '{name}' created successfully!")
+    print("=" * 60)
+    print(f"\n  Total papers:     {stats.total}")
+    print(f"  Train:            {stats.train}")
+    print(f"  Validation:       {stats.val}")
+    print(f"  Test:             {stats.test}")
+    print(f"  Downloaded:       {stats.downloaded}")
+    print(f"  Config file:      {config_path}")
+    print("=" * 60)
+
+
+def _parse_curated_json(json_path: str) -> list[dict[str, Any]]:
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+
+    if not isinstance(data, list):
+        raise ValueError(f"Expected JSON array, got {type(data).__name__}")
+
+    papers: list[dict[str, Any]] = []
+
+    for group_item in data:
+        group_name = group_item.get("group", "unknown")
+
+        if "core_paper" in group_item:
+            cp = group_item["core_paper"]
+            papers.append(
+                {
+                    "arxiv_id": cp["arxivId"],
+                    "title": cp.get("название", cp.get("title", "")),
+                    "group": group_name,
+                    "tier": "core",
+                }
+            )
+
+        if "core_papers" in group_item:
+            for cp in group_item["core_papers"]:
+                papers.append(
+                    {
+                        "arxiv_id": cp["arxivId"],
+                        "title": cp.get("название", cp.get("title", "")),
+                        "group": group_name,
+                        "tier": "core",
+                    }
+                )
+
+        if "downstream_papers" in group_item:
+            for dp in group_item["downstream_papers"]:
+                papers.append(
+                    {
+                        "arxiv_id": dp["arxivId"],
+                        "title": dp.get("название", dp.get("title", "")),
+                        "group": group_name,
+                        "tier": "downstream",
+                    }
+                )
+
+        if "papers" in group_item:
+            for sp in group_item["papers"]:
+                papers.append(
+                    {
+                        "arxiv_id": sp["arxivId"],
+                        "title": sp.get("название", sp.get("title", "")),
+                        "group": group_name,
+                        "tier": "survey",
+                    }
+                )
+
+    return papers

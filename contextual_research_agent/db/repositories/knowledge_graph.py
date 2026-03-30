@@ -32,6 +32,14 @@ class KnowledgeGraphRepository(BaseRepository):
         if not edges:
             return 0
 
+        seen: set[tuple[str, str]] = set()
+        unique_edges: list[CitationEdge] = []
+        for e in edges:
+            key = (e.citing_paper_id, e.cited_paper_id)
+            if key not in seen:
+                seen.add(key)
+                unique_edges.append(e)
+
         records = [
             (
                 e.citing_paper_id,
@@ -45,7 +53,7 @@ class KnowledgeGraphRepository(BaseRepository):
                 e.cited_authors[:1000] if e.cited_authors else None,
                 e.cited_year or None,
             )
-            for e in edges
+            for e in unique_edges
         ]
 
         with self._conn.cursor() as cur:

@@ -4,6 +4,7 @@ from contextual_research_agent.cli.agent import chat, list_docs, query, retrieve
 from contextual_research_agent.cli.arxiv import download_arxiv_papers, ingest_arxiv_metadata
 from contextual_research_agent.cli.datasets import (
     create_dataset,
+    create_dataset_from_json,
     download_dataset,
     export_dataset_config,
     list_datasets,
@@ -22,6 +23,7 @@ from contextual_research_agent.cli.retrieval import (
 )
 from contextual_research_agent.cli.retrieval import (
     generate_eval_set,
+    map_eval_queries_to_chunks,
 )
 from contextual_research_agent.cli.retrieval import (
     retrieve as retrieval_retrieve,
@@ -41,6 +43,7 @@ def main() -> None:
             "download-papers": download_arxiv_papers,
             # Datasets management
             "create-dataset": create_dataset,
+            "create-dataset-from-json": create_dataset_from_json,
             "list-datasets": list_datasets,
             "show-dataset": show_dataset,
             "download-dataset": download_dataset,
@@ -63,5 +66,6 @@ def main() -> None:
             "retrieval-retrieve": retrieval_retrieve,  # query → multi-channel retrieval
             "retrieval-evaluate": retrieval_evaluate,  # run eval set → IR metrics → MLflow
             "generate-eval-set": generate_eval_set,  # corpus → synthetic eval queries
+            "map-eval-queries": map_eval_queries_to_chunks,
         }
     )

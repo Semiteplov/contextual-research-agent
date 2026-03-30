@@ -190,11 +190,11 @@ class IRQualityMetrics:
     def to_mlflow_metrics(self, prefix: str = "ir") -> dict[str, float]:
         m: dict[str, float] = {f"{prefix}/mrr": self.mrr}
         for k in self.k_values:
-            m[f"{prefix}/recall@{k}"] = self.recall_at_k.get(k, 0.0)
-            m[f"{prefix}/precision@{k}"] = self.precision_at_k.get(k, 0.0)
-            m[f"{prefix}/ndcg@{k}"] = self.ndcg_at_k.get(k, 0.0)
-            m[f"{prefix}/hit_rate@{k}"] = self.hit_rate_at_k.get(k, 0.0)
-            m[f"{prefix}/map@{k}"] = self.map_at_k.get(k, 0.0)
+            m[f"{prefix}/recall_at_{k}"] = self.recall_at_k.get(k, 0.0)
+            m[f"{prefix}/precision_at_{k}"] = self.precision_at_k.get(k, 0.0)
+            m[f"{prefix}/ndcg_at_{k}"] = self.ndcg_at_k.get(k, 0.0)
+            m[f"{prefix}/hit_rate_at_{k}"] = self.hit_rate_at_k.get(k, 0.0)
+            m[f"{prefix}/map_at_{k}"] = self.map_at_k.get(k, 0.0)
         return m
 
 
@@ -271,7 +271,7 @@ def compute_ir_metrics(
             if binary_rels[i] > 0:
                 running_hits += 1
                 ap += running_hits / (i + 1)
-        metrics.map_at_k[k] = ap / min(total_relevant, k) if total_relevant > 0 else 0.0
+        metrics.map_at_k[k] = ap / total_relevant if total_relevant > 0 else 0.0
 
     return metrics
 
@@ -317,11 +317,11 @@ class AggregatedIRMetrics:
             f"{prefix}/p95_latency_ms": self.p95_latency_ms,
         }
         for k in self.k_values:
-            m[f"{prefix}/mean_recall@{k}"] = self.mean_recall_at_k.get(k, 0.0)
-            m[f"{prefix}/mean_ndcg@{k}"] = self.mean_ndcg_at_k.get(k, 0.0)
-            m[f"{prefix}/mean_precision@{k}"] = self.mean_precision_at_k.get(k, 0.0)
-            m[f"{prefix}/mean_hit_rate@{k}"] = self.mean_hit_rate_at_k.get(k, 0.0)
-            m[f"{prefix}/mean_map@{k}"] = self.mean_map_at_k.get(k, 0.0)
+            m[f"{prefix}/mean_recall_at_{k}"] = self.mean_recall_at_k.get(k, 0.0)
+            m[f"{prefix}/mean_ndcg_at_{k}"] = self.mean_ndcg_at_k.get(k, 0.0)
+            m[f"{prefix}/mean_precision_at_{k}"] = self.mean_precision_at_k.get(k, 0.0)
+            m[f"{prefix}/mean_hit_rate_at_{k}"] = self.mean_hit_rate_at_k.get(k, 0.0)
+            m[f"{prefix}/mean_map_at_{k}"] = self.mean_map_at_k.get(k, 0.0)
         return m
 
 
