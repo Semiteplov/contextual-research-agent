@@ -6,6 +6,7 @@ from typing import Any
 
 from contextual_research_agent.common.logging import get_logger
 from contextual_research_agent.ingestion.embeddings.base import Embedder
+from contextual_research_agent.ingestion.embeddings.sparse import SparseEncoder
 from contextual_research_agent.retrieval.channels import RetrievalChannel
 from contextual_research_agent.retrieval.channels.context import ContextAssembler
 from contextual_research_agent.retrieval.channels.dense import DenseChannel
@@ -14,6 +15,7 @@ from contextual_research_agent.retrieval.channels.graph import (
     EntityGraphChannel,
 )
 from contextual_research_agent.retrieval.channels.paper_level import PaperLevelChannel
+from contextual_research_agent.retrieval.channels.sparse import QdrantSparseBackend, SparseChannel
 from contextual_research_agent.retrieval.config import FusionConfig, RetrievalConfig
 from contextual_research_agent.retrieval.fusion import FusionStrategy, create_fusion_strategy
 from contextual_research_agent.retrieval.metrics import (
@@ -135,11 +137,11 @@ class RetrievalPipeline:
             top_n=self._config.fusion.top_n,
         )
 
-        rerank_top_k = top_k or self._config.rerank.top_k
+        # rerank_top_k = top_k or self._config.rerank.top_k
         rerank_result = await self._reranker.rerank(
             query=query,
             candidates=fusion_result.candidates,
-            top_k=rerank_top_k,
+            top_k=self._config.fusion.top_n,
         )
 
         context, final_candidates = self._context_assembler.assemble(
@@ -215,6 +217,7 @@ def create_retrieval_pipeline(
     config: RetrievalConfig | None = None,
     paper_store: Any | None = None,
     graph_repo: Any | None = None,
+    arxiv_to_doc_id: dict[str, str] | None = None,
 ) -> RetrievalPipeline:
     config = config or RetrievalConfig()
     channels: list[RetrievalChannel] = []
@@ -225,6 +228,23 @@ def create_retrieval_pipeline(
                 vector_store=vector_store,
                 embedder=embedder,
                 config=config.dense,
+            )
+        )
+
+    if config.sparse.enabled:
+        sparse_encoder = SparseEncoder(model_name=config.sparse.sparse_model)
+
+        sparse_backend = QdrantSparseBackend(
+            client=vector_store._client,
+            collection_name=vector_store.collection_name,
+            sparse_vector_name="sparse",
+            sparse_encoder=sparse_encoder,
+        )
+
+        channels.append(
+            SparseChannel(
+                backend=sparse_backend,
+                config=config.sparse,
             )
         )
 
@@ -248,6 +268,7 @@ def create_retrieval_pipeline(
                     vector_store=vector_store,
                     embedder=embedder,
                     config=config.graph,
+                    arxiv_to_doc_id=arxiv_to_doc_id,
                 )
             )
 
@@ -258,6 +279,7 @@ def create_retrieval_pipeline(
                     vector_store=vector_store,
                     embedder=embedder,
                     config=config.graph,
+                    arxiv_to_doc_id=arxiv_to_doc_id,
                 )
             )
 

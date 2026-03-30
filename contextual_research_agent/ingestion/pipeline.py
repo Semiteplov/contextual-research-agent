@@ -380,9 +380,10 @@ class IngestionPipeline:
                         extra={"doc_id": document.id, "citation_edges": len(citation_result.edges)},
                     )
                 except Exception as e:
-                    logger.exception(
-                        "Citation storage failed (non-fatal)", extra={"doc_id": document.id}
-                    )
+                    logger.exception("Citation storage failed (non-fatal)")
+                    if self._graph_repo and hasattr(self._graph_repo, "_conn"):
+                        with contextlib.suppress(Exception):
+                            self._graph_repo._conn.rollback()
 
             if entity_result and entity_result.edges:
                 try:

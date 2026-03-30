@@ -244,3 +244,11 @@ class PaperFilesRepository(BaseRepository):
                 (arxiv_ids, file_type.value),
             )
             return cur.rowcount
+
+    def paper_exists(self, arxiv_id: str) -> bool:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM arxiv_papers_metadata WHERE arxiv_id = %s",
+                (arxiv_id,),
+            )
+            return cur.fetchone() is not None

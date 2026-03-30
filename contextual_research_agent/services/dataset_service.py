@@ -385,3 +385,116 @@ class DatasetService:
         logger.info("Downloading %d PDFs...", len(arxiv_ids))
 
         return self._download_papers(arxiv_ids)
+
+    def create_dataset_from_ids(  # noqa: PLR0913
+        self,
+        name: str,
+        arxiv_ids: list[str],
+        description: str | None = None,
+        purpose: str = "evaluation",
+        train_ratio: float = 0.8,
+        val_ratio: float = 0.1,
+        test_ratio: float = 0.1,
+        random_seed: int = 42,
+        download_pdfs: bool = True,
+        config_output_dir: str = "configs/datasets",
+        overwrite: bool = False,
+        skip_missing: bool = True,
+        metadata: dict | None = None,
+    ):
+        """
+        Create dataset from explicit list of arxiv_ids.
+
+        Unlike create_dataset() which queries by categories/keywords,
+        this method takes a pre-curated list of paper IDs.
+
+        Args:
+            name: Dataset name.
+            arxiv_ids: List of arxiv paper IDs.
+            skip_missing: If True, papers not in arxiv_papers_metadata
+                are skipped (logged as warning). If False, raises error.
+            metadata: Additional metadata to store with the dataset
+                (e.g., group info, tiers).
+        """
+        logger = get_logger(__name__)
+
+        logger.info("Creating dataset '%s' from %d explicit arxiv_ids", name, len(arxiv_ids))
+
+        with get_connection_context() as conn:
+            papers_repo = PaperFilesRepository(conn)
+
+            # Validate: check which IDs exist in arxiv_papers_metadata
+            existing_ids = []
+            missing_ids = []
+
+            for aid in arxiv_ids:
+                if papers_repo.paper_exists(aid):
+                    existing_ids.append(aid)
+                else:
+                    missing_ids.append(aid)
+
+            if missing_ids:
+                logger.warning(
+                    "%d papers not found in arxiv_papers_metadata: %s",
+                    len(missing_ids),
+                    missing_ids[:10],
+                )
+                if not skip_missing:
+                    raise ValueError(
+                        f"{len(missing_ids)} papers not found in database: {missing_ids[:5]}..."
+                    )
+
+            if not existing_ids:
+                raise ValueError("No papers from the provided list exist in the database")
+
+            logger.info(
+                "Found %d/%d papers in database (%d missing)",
+                len(existing_ids),
+                len(arxiv_ids),
+                len(missing_ids),
+            )
+
+            # Store selection criteria for reproducibility
+            selection_criteria = {
+                "method": "curated_json",
+                "total_requested": len(arxiv_ids),
+                "total_found": len(existing_ids),
+                "missing_ids": missing_ids,
+            }
+            if metadata:
+                selection_criteria["metadata"] = metadata
+
+            datasets_repo = DatasetsRepository(conn)
+            datasets_repo.create(
+                name=name,
+                arxiv_ids=existing_ids,
+                selection_criteria=selection_criteria,
+                description=description,
+                purpose=purpose,
+                train_ratio=train_ratio,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+                random_seed=random_seed,
+                overwrite=overwrite,
+            )
+
+        if download_pdfs:
+            logger.info("Starting PDF download for %d papers...", len(existing_ids))
+            self._download_dataset_pdfs(name)
+
+        with get_connection_context() as conn:
+            datasets_repo = DatasetsRepository(conn)
+            dataset = datasets_repo.get_by_name(name)
+            stats = datasets_repo.get_stats(name)
+
+        if dataset is None:
+            raise ValueError(f"Failed to retrieve created dataset '{name}'")
+        if stats is None:
+            raise ValueError(f"Failed to retrieve stats for dataset '{name}'")
+
+        config_path = self._export_config(
+            name=name,
+            output_dir=config_output_dir,
+        )
+
+        return dataset, stats, config_path

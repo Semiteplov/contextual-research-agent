@@ -11,6 +11,7 @@ import psycopg2
 
 from contextual_research_agent.common.logging import get_logger
 from contextual_research_agent.common.settings import get_settings
+from contextual_research_agent.db.connection import get_connection
 from contextual_research_agent.db.repositories.knowledge_graph import (
     KnowledgeGraphRepository,
 )
@@ -54,6 +55,8 @@ def retrieve(  # noqa: PLR0913
     document: str | None = None,
     channels: str = "dense",
     verbose: bool = False,
+    log_mlflow: bool = False,
+    experiment_name: str = "retrieval",
 ) -> None:
     """
     Retrieve chunks for a query using the multi-channel pipeline.
@@ -72,13 +75,19 @@ def retrieve(  # noqa: PLR0913
     """
 
     async def _run() -> None:
+        channel_list = (
+            channels
+            if isinstance(channels, list)
+            else (list(channels) if isinstance(channels, tuple) else channels.split(","))
+        )
+
         pipeline, config = await _build_pipeline(
             collection=collection,
             embedding_model=embedding_model,
             rerank_enabled=rerank,
             rerank_model=rerank_model,
             device=device,
-            enabled_channels=channels.split(","),
+            enabled_channels=channel_list,
         )
 
         document_ids = [document] if document else None
@@ -90,6 +99,20 @@ def retrieve(  # noqa: PLR0913
         )
 
         _print_retrieval_result(result, verbose=verbose)
+
+        if log_mlflow:
+            tracker = RetrievalTracker(
+                experiment_name=experiment_name,
+                tracking_uri=get_settings().mlflow.tracking_uri,
+            )
+            operational = compute_operational_metrics(result)
+
+            tracker.log_single_query(
+                config=config,
+                ir_metrics=IRQualityMetrics(query=question),
+                operational=operational,
+                run_name=f"query_{question[:30]}",
+            )
 
     asyncio.run(_run())
 
@@ -127,7 +150,16 @@ def evaluate(  # noqa: PLR0913
 
     async def _run() -> None:
         eval_data = _load_eval_set(eval_set)
-        k_list = [int(k) for k in k_values.split(",")]
+        k_list = [
+            int(k)
+            for k in (k_values if isinstance(k_values, str) else ",".join(k_values)).split(",")
+        ]
+
+        channel_list = (
+            channels
+            if isinstance(channels, list)
+            else (list(channels) if isinstance(channels, tuple) else channels.split(","))
+        )
 
         pipeline, config = await _build_pipeline(
             collection=collection,
@@ -135,7 +167,7 @@ def evaluate(  # noqa: PLR0913
             rerank_enabled=rerank,
             rerank_model=rerank_model,
             device=device,
-            enabled_channels=channels.split(","),
+            enabled_channels=channel_list,
         )
 
         per_query_ir: list[IRQualityMetrics] = []
@@ -183,13 +215,14 @@ def evaluate(  # noqa: PLR0913
 
         operational_metrics = [compute_operational_metrics(r) for r in all_results]
 
+        channels_str = ",".join(channel_list)
         tracker.log_evaluation(
             config=config,
             agg_metrics=agg,
             per_query=per_query_ir,
             operational=operational_metrics,
             run_name=run_name,
-            tags={"channels": channels},
+            tags={"channels": channels_str},
             eval_set_path=eval_set,
         )
 
@@ -317,6 +350,22 @@ async def _build_pipeline(  # noqa: PLR0913
         dense_vector_name="dense" if is_hybrid else None,
     )
 
+    arxiv_to_doc_id: dict[str, str] = {}
+    try:
+        client = vector_store._client
+        points, _ = client.scroll(
+            collection_name=collection,
+            limit=10000,
+            with_payload=["document_id"],
+        )
+        for p in points:
+            doc_id = p.payload.get("document_id", "")
+            arxiv_id = doc_id.split("_")[0] if "_" in doc_id else doc_id
+            arxiv_to_doc_id[arxiv_id] = doc_id
+        logger.info("Built arxiv→doc_id mapping: %d entries", len(arxiv_to_doc_id))
+    except Exception as e:
+        logger.warning("Failed to build arxiv→doc_id mapping: %s", e)
+
     paper_collection = f"{collection}_papers"
     paper_store = None
     try:
@@ -331,15 +380,7 @@ async def _build_pipeline(  # noqa: PLR0913
 
     graph_repo = None
     try:
-        settings = get_settings()
-        conn = psycopg2.connect(
-            host=settings.postgres.host,
-            port=settings.postgres.port,
-            dbname=settings.postgres.db,
-            user=settings.postgres.user,
-            password=settings.postgres.password.get_secret_value(),
-        )
-        conn.autocommit = True
+        conn = get_connection("arxiv")
         graph_repo = KnowledgeGraphRepository(conn)
     except Exception as e:
         logger.warning("Knowledge graph not available: %s", e)
@@ -351,6 +392,10 @@ async def _build_pipeline(  # noqa: PLR0913
         graph=GraphChannelConfig(
             citation_enabled="graph_citation" in enabled_channels,
             entity_enabled="graph_entity" in enabled_channels,
+            seed_top_k=10,
+            citation_depth=2,
+            max_papers=15,
+            chunks_per_paper=3,
         ),
         paper_level=PaperLevelConfig(enabled="paper_level" in enabled_channels),
         fusion=FusionConfig(strategy="rrf"),
@@ -368,6 +413,7 @@ async def _build_pipeline(  # noqa: PLR0913
         config=config,
         paper_store=paper_store,
         graph_repo=graph_repo,
+        arxiv_to_doc_id=arxiv_to_doc_id,
     )
 
     return pipeline, config
@@ -422,4 +468,89 @@ def _print_retrieval_result(result: Any, verbose: bool = False) -> None:
                 text = text[:200] + "..."
             print(f"    {text}")
 
+    print("\n" + "-" * 60)
+    print("Operational Metrics")
+    print("=" * 60)
+    print(f"  Total latency:     {result.total_latency_ms:.0f}ms")
+    print(f"  Query analysis:    {result.query_analysis_ms:.1f}ms")
+    for cr in result.channel_results:
+        print(f"  {cr.channel.value}:  {cr.latency_ms:.0f}ms ({cr.num_candidates} candidates)")
+    if result.fusion_result:
+        print(f"  Fusion:            {result.fusion_result.latency_ms:.1f}ms")
+    if result.rerank_result:
+        print(f"  Rerank:            {result.rerank_result.latency_ms:.0f}ms")
+    print(f"  Unique documents:  {len(result.document_ids)}")
+
     print()
+
+
+def map_eval_queries_to_chunks(  # noqa: PLR0913
+    eval_path: str = "eval/peft_gold_v1.json",
+    collection: str = "peft_hybrid",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
+    top_k_per_paper: int = 10,
+    score_threshold: float = 0.35,
+    output: str = "eval/peft_gold_v1_mapped.json",
+) -> None:
+    """
+    Map evaluation queries to relevant chunk_ids.
+
+    For each query:
+      1. Embed query
+      2. Search within source_papers (document_id filter)
+      3. Filter by relevant_sections (section_type filter)
+      4. Take top-K chunks above threshold as relevant_ids
+    """
+
+    async def _run() -> None:
+        eval_data = json.loads(Path(eval_path).read_text())
+        embedder = create_hf_embedder(model=embedding_model)
+        store = await create_qdrant_store(
+            collection_name=collection,
+            embedding_dim=embedder.dimension,
+        )
+
+        mapped = 0
+        empty = 0
+
+        for i, item in enumerate(eval_data):
+            query = item["query"]
+
+            query_embedding = await embedder.embed_query(query)
+
+            results, _ = await store.search(
+                query_embedding=query_embedding,
+                top_k=top_k_per_paper,
+                score_threshold=score_threshold,
+            )
+
+            all_chunks = []
+            for chunk, score in results:
+                all_chunks.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "score": score,
+                        "section_type": chunk.metadata.get("section_type", ""),
+                        "document_id": chunk.document_id,
+                        "text_preview": chunk.text[:150],
+                    }
+                )
+
+            all_chunks.sort(key=lambda x: x["score"], reverse=True)
+            top_chunks = all_chunks[:top_k_per_paper]
+
+            item["relevant_ids"] = [c["chunk_id"] for c in top_chunks]
+            item["mapped_chunks"] = top_chunks
+
+            if top_chunks:
+                mapped += 1
+            else:
+                empty += 1
+
+            if (i + 1) % 20 == 0:
+                print(f"  Mapped {i + 1}/{len(eval_data)} ({mapped} with chunks, {empty} empty)")
+
+        Path(output).write_text(json.dumps(eval_data, indent=2))
+        print(f"\nDone: {mapped} mapped, {empty} empty → {output}")
+
+    asyncio.run(_run())

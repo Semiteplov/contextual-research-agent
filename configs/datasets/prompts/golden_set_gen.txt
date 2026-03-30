@@ -1,0 +1,190 @@
+You are generating a gold evaluation dataset for an Information Retrieval system over scientific papers about Parameter-Efficient Fine-Tuning (PEFT).
+I need you to generate queries that a real ML researcher would ask when working with these papers. Each query must have a ground-truth answer traceable to specific paper(s).
+PAPERS IN THIS BATCH (LoRA family):
+1. "LoRA: Low-Rank Adaptation of Large Language Models" (arxiv: 2106.09685) — introduces low-rank decomposition W = W₀ + BA for parameter-efficient fine-tuning
+2. "ReLoRA: High-Rank Training Through Low-Rank Updates" (arxiv: 2307.05695) — periodic merge-and-reinit of LoRA for higher effective rank
+3. "VeRA: Vector-based Random Matrix Adaptation" (arxiv: 2310.11453) — shared frozen random matrices + trainable scaling vectors
+4. "S-LoRA: Serving Thousands of Concurrent LoRA Adapters" (arxiv: 2311.03285) — efficient batched serving of multiple LoRA adapters
+5. "LongLoRA: Efficient Fine-tuning of Long-Context Large Language Models" (arxiv: 2309.12307) — shifted sparse attention + LoRA for long contexts
+6. "PiSSA: Principal Singular Values and Singular Vectors Adaptation" (arxiv: 2404.02948) — SVD-based initialization instead of random
+7. "MoRA: High-Rank Update with Reduced Parameter Sharing" (arxiv: 2405.12130) — square matrix adaptation for higher rank updates
+Generate exactly 50 queries distributed as follows:
+FACTUAL_QA (12 queries) — specific facts, numbers, hyperparameters:
+- Must reference concrete values from papers (rank values, parameter counts, accuracy numbers, dataset names)
+- Answer should be 1-2 sentences
+METHOD_EXPLANATION (12 queries) — how mechanisms work:
+- Ask about specific technical components (decomposition, initialization, attention modification)
+- Answer should explain the mechanism in 2-3 sentences
+COMPARISON (10 queries) — differences between approaches:
+- Compare papers within this batch (LoRA vs VeRA, PiSSA vs standard LoRA init, etc.)
+- Answer should identify key differences
+CRITIQUE (8 queries) — limitations, weaknesses, assumptions:
+- Ask about failure cases, scalability issues, theoretical gaps
+- Answer should identify specific limitations mentioned in papers
+SURVEY (5 queries) — broad questions spanning multiple papers:
+- Ask about trends, evolution of ideas
+- Answer should reference 2+ papers
+CITATION_TRACE (3 queries) — relationship between papers:
+- Ask about which papers build on which
+- Answer should trace the lineage
+OUTPUT FORMAT — strict JSON array, no markdown fences, no commentary:
+[
+  {
+    "query": "What is the default rank value used in LoRA experiments?",
+    "category": "factual_qa",
+    "expected_answer": "LoRA typically uses rank r=4 or r=8. In the original paper, the authors experiment with ranks from 1 to 64, finding that even r=4 performs competitively with full fine-tuning on most tasks.",
+    "source_papers": ["2106.09685"],
+    "difficulty": "easy",
+    "relevant_sections": ["experiments", "method"]
+  }
+]
+RULES:
+- Every query must be answerable from the listed papers
+- source_papers: list of arxiv_ids that contain the answer
+- difficulty: "easy" (single fact), "medium" (requires understanding), "hard" (synthesis across sections/papers)
+- relevant_sections: from [abstract, introduction, method, experiments, results, related_work, conclusion, limitations, background]
+- Do NOT generate generic questions like "What is PEFT?" — be specific to these papers
+- Queries should use natural language, not paper titles as references
+- Include technical terminology (SVD, low-rank, quantization, etc.)
+Generate the 40 queries now.
+
+
+
+You are generating evaluation queries for an IR system. Continue the same format.
+
+PAPERS IN THIS BATCH:
+
+1. "QLoRA: Efficient Finetuning of Quantized LLMs" (arxiv: 2305.14314) — 4-bit NormalFloat quantization + LoRA, double quantization, paged optimizers
+
+2. "LoftQ: LoRA-Fine-Tuning-Aware Quantization for Large Language Models" (arxiv: 2310.08659) — alternating quantization-and-SVD for better LoRA init on quantized models
+
+3. "QA-LoRA: Quantization-Aware Low-Rank Adaptation" (arxiv: 2309.14717) — group-wise quantization operators integrated with LoRA
+
+4. "DoRA: Weight-Decomposed Low-Rank Adaptation" (arxiv: 2402.09353) — decomposes weight into magnitude and direction, applies LoRA to direction only
+
+5. "AdaLoRA: Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning" (arxiv: 2303.10512) — SVD-based importance scoring for dynamic rank allocation across layers
+
+6. "FlexLoRA: Entropy-Guided Flexible Low-Rank Adaptation" (arxiv: 2601.22905) — entropy-based rank selection
+
+Generate exactly 45 queries:
+
+- FACTUAL_QA: 10
+
+- METHOD_EXPLANATION: 10
+
+- COMPARISON: 10 (compare across quantization methods, compare DoRA vs LoRA, compare rank allocation strategies)
+
+- CRITIQUE: 7
+
+- SURVEY: 5
+
+- CITATION_TRACE: 3
+
+Same JSON format as before. source_papers must reference arxiv_ids from this batch. For COMPARISON queries, source_papers should list both papers being compared.
+
+
+
+You are generating evaluation queries for an IR system. Continue the same format.
+
+PAPERS IN THIS BATCH:
+1. "Prefix-Tuning: Optimizing Continuous Prompts for Generation" (arxiv: 2101.00190) — prepends trainable continuous vectors to keys/values at every layer
+2. "The Power of Scale for Parameter-Efficient Prompt Tuning" (arxiv: 2104.08691) — soft prompt tokens prepended to input, scales with model size
+3. "P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally" (arxiv: 2203.12277) — deep prompt tuning across layers, competitive with fine-tuning on NLU
+4. "Towards a Unified View of Parameter-Efficient Transfer Learning" (arxiv: 2110.04366) — proves mathematical equivalence between adapters, prefix-tuning, and LoRA
+5. "Parameter-Efficient Transfer Learning for NLP" (arxiv: 1902.00751) — original Houlsby adapter: bottleneck layers inserted after attention and FFN
+6. "AdapterFusion: Non-Destructive Task Composition for Transfer Learning" (arxiv: 2005.00247) — learns to combine multiple task-specific adapters via attention
+7. "LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention" (arxiv: 2303.16199) — zero-initialized gating for adapter injection into LLaMA
+
+Generate exactly 45 queries:
+- FACTUAL_QA: 10
+- METHOD_EXPLANATION: 10
+- COMPARISON: 10 (prefix-tuning vs prompt tuning, adapters vs LoRA, unified view connections)
+- CRITIQUE: 7
+- SURVEY: 5
+- CITATION_TRACE: 3
+
+Same JSON format. For the "Unified View" paper (2110.04366), generate comparison queries that test whether the IR system can find the equivalence proofs.
+
+
+
+You are generating CROSS-DOCUMENT evaluation queries for an IR system over a corpus of 32 PEFT papers.
+
+THE FULL CORPUS:
+Core LoRA: LoRA (2106.09685), ReLoRA (2307.05695), VeRA (2310.11453), S-LoRA (2311.03285), LongLoRA (2309.12307), PiSSA (2404.02948), MoRA (2405.12130)
+Quantized: QLoRA (2305.14314), LoftQ (2310.08659), QA-LoRA (2309.14717)
+DoRA family: DoRA (2402.09353)
+AdaLoRA family: AdaLoRA (2303.10512), FlexLoRA (2601.22905)
+Prompt/Prefix: Prefix-Tuning (2101.00190), Prompt Tuning (2104.08691), P-Tuning v2 (2203.12277), Unified View (2110.04366)
+Adapters: Houlsby (1902.00751), AdapterFusion (2005.00247), LLaMA-Adapter (2303.16199)
+Surveys: Comprehensive Survey (2403.14608), PEFT A2Z (2504.14117), Scaling Down (2303.15647), LLM Post-Training (2502.21321)
+
+Generate exactly 60 cross-document queries. Every query MUST require information from 2+ papers.
+
+Distribution:
+- COMPARISON (18): compare specific techniques across families (LoRA vs Prefix-Tuning efficiency, QLoRA vs LoftQ quantization, adapter vs LoRA architecture)
+- SURVEY (15): broad questions spanning 3+ papers ("What are the main categories of PEFT methods?", "How has low-rank adaptation evolved since 2021?")
+- FACTUAL_QA (10): facts that appear in multiple papers ("Which PEFT methods have been evaluated on GLUE?", "What is the typical parameter reduction ratio?")
+- CITATION_TRACE (10): lineage questions ("Which methods directly extend LoRA?", "What approaches cite Houlsby adapters as foundational?")
+- METHOD_EXPLANATION (5): mechanisms that span papers ("How do quantization-aware PEFT methods preserve model quality?")
+- CRITIQUE (2): cross-cutting limitations ("What common limitations do low-rank methods share?")
+
+Same JSON format. source_papers MUST contain 2+ arxiv_ids for every query.
+
+IMPORTANT: Queries should feel natural — like a researcher would ask during a literature review, not like exam questions. Use terminology from the papers.
+
+
+
+You are generating evaluation queries for an IR system. This is the final batch 
+focusing on SURVEY papers and HARD SYNTHESIS questions.
+
+SURVEY PAPERS IN CORPUS:
+1. "Parameter-Efficient Fine-Tuning for Large Models: A Comprehensive Survey" (arxiv: 2403.14608) — covers LoRA, adapters, prompt tuning, taxonomy of PEFT methods
+2. "PEFT A2Z: Parameter-Efficient Fine-Tuning Survey for Large Language and Vision Models" (arxiv: 2504.14117) — covers vision+language PEFT, benchmarks
+3. "Scaling Down to Scale Up: A Guide to Parameter-Efficient Fine-Tuning" (arxiv: 2303.15647) — practical guide, when to use which method
+4. "LLM Post-Training: A Deep Dive into Reasoning Large Language Models" (arxiv: 2502.21321) — connects PEFT to alignment and post-training
+
+ALSO REFERENCE these core papers when relevant:
+- LoRA (2106.09685), QLoRA (2305.14314), DoRA (2402.09353), AdaLoRA (2303.10512)
+- Prefix-Tuning (2101.00190), Prompt Tuning (2104.08691), Unified View (2110.04366)
+- Houlsby Adapter (1902.00751), AdapterFusion (2005.00247), LLaMA-Adapter (2303.16199)
+- VeRA (2310.11453), PiSSA (2404.02948), MoRA (2405.12130)
+- LoftQ (2310.08659), LongLoRA (2309.12307), S-LoRA (2311.03285)
+- FlexLoRA (2601.22905), P-Tuning v2 (2203.12277)
+
+Generate exactly 50 queries. These should be the HARDEST queries in the dataset — 
+requiring deep understanding and synthesis across multiple papers.
+
+Distribution:
+- SURVEY (15): broad taxonomic questions requiring information from surveys + core papers
+  Examples: "How do survey papers categorize the landscape of PEFT methods?",
+  "What taxonomy of parameter-efficient methods is proposed in recent comprehensive reviews?"
+  
+- COMPARISON (12): nuanced multi-dimensional comparisons
+  Examples: "Compare the memory-compute tradeoffs of LoRA, QLoRA, and adapter-based methods",
+  "What are the relative strengths of prompt-based vs weight-based PEFT approaches for NLU tasks?"
+
+- METHOD_EXPLANATION (8): complex mechanisms requiring understanding of multiple papers
+  Examples: "How does the mathematical equivalence between adapters and prefix-tuning work?",
+  "What is the relationship between SVD-based initialization (PiSSA) and SVD-based rank allocation (AdaLoRA)?"
+
+- FACTUAL_QA (5): facts that surveys aggregate from multiple sources
+  Examples: "What parameter reduction ratios do different PEFT methods achieve according to survey analyses?"
+
+- CITATION_TRACE (5): evolution and influence questions
+  Examples: "How did the PEFT field evolve from Houlsby adapters (2019) to modern LoRA variants (2024)?",
+  "Which foundational papers are cited by all major PEFT surveys?"
+
+- CRITIQUE (5): cross-cutting limitations and open problems
+  Examples: "What open problems in PEFT do recent surveys identify?",
+  "What are the common failure modes shared across low-rank adaptation methods?"
+
+DIFFICULTY: Mark at least 30 of 50 as "hard". These queries should require 
+finding and synthesizing information from 2-4 different papers.
+
+Same JSON format as before. Every query must have source_papers with 2+ arxiv_ids.
+
+IMPORTANT:
+- Do NOT repeat queries from previous batches
+- Focus on questions a thesis reviewer or senior researcher would ask
+- Include questions about experimental methodology, not just results
+- Include questions about practical deployment considerations
