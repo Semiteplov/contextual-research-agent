@@ -76,30 +76,87 @@ _INTENT_WEIGHT_OVERRIDES: dict[QueryIntent, dict[str, float]] = {
 }
 
 _INTENT_PATTERNS: list[tuple[re.Pattern, QueryIntent]] = [
-    # Citation trace
     (
         re.compile(r"(cit(e|es|ed|ation)|reference[sd]?|who\s+(cit|refer))", re.IGNORECASE),
         QueryIntent.CITATION_TRACE,
     ),
     (
-        re.compile(r"(based\s+on|build[s]?\s+on|extend[s]?|follow[s]?\s+up)", re.IGNORECASE),
+        re.compile(
+            r"(based\s+on|build[s]?\s+on|extend[s]?\s+(upon|from|the\s+work)|follow[s]?\s+up)",
+            re.IGNORECASE,
+        ),
         QueryIntent.CITATION_TRACE,
     ),
-    # Comparison
     (
         re.compile(
-            r"(compar|vs\.?|versus|differ|better|worse|outperform|benchmark)", re.IGNORECASE
+            r"^(how (much|many|often|long|large|far)|what (is the |are the )?"
+            r"(number|count|amount|size|accuracy|percentage|score|rank|rate|ratio|"
+            r"maximum|minimum|default|total))",
+            re.IGNORECASE,
+        ),
+        QueryIntent.FACTUAL_QA,
+    ),
+    (
+        re.compile(
+            r"^what\s+\w+\s+(does|do|did)\s+\w+\s+"
+            r"(use|achieve|have|get|reach|report|produce|require|need)",
+            re.IGNORECASE,
+        ),
+        QueryIntent.FACTUAL_QA,
+    ),
+    (
+        re.compile(
+            r"^which\s+(?!papers?\s+(cite|reference))\w+",
+            re.IGNORECASE,
+        ),
+        QueryIntent.FACTUAL_QA,
+    ),
+    (
+        re.compile(
+            r"^what\s+is\s+(the\s+)?(maximum|minimum|default|optimal|recommended|standard)",
+            re.IGNORECASE,
+        ),
+        QueryIntent.FACTUAL_QA,
+    ),
+    (
+        re.compile(
+            r"^how\s+(many|much)\s+\w+\s+(parameter|layer|epoch|token|sample|step|iteration)",
+            re.IGNORECASE,
+        ),
+        QueryIntent.FACTUAL_QA,
+    ),
+    (
+        re.compile(
+            r"(^compare\b|^contrast\b|\bvs\.?\b|\bversus\b|"
+            r"difference[s]?\s+between|advantages?\s+(and|over)\s+disadvantages?)",
+            re.IGNORECASE,
         ),
         QueryIntent.COMPARISON,
     ),
-    (re.compile(r"(SOTA|state.of.the.art|baseline[s]?)", re.IGNORECASE), QueryIntent.COMPARISON),
-    # Critique
+    (
+        re.compile(
+            r"how\s+(does|do)\s+\w+\s+compare\s+to",
+            re.IGNORECASE,
+        ),
+        QueryIntent.COMPARISON,
+    ),
+    (
+        re.compile(r"(SOTA|state.of.the.art|baseline[s]?)", re.IGNORECASE),
+        QueryIntent.COMPARISON,
+    ),
     (
         re.compile(r"(weak|flaw|limit|shortcoming|problem|issue|bias|assumption)", re.IGNORECASE),
         QueryIntent.CRITIQUE,
     ),
     (re.compile(r"(critic|review|evaluat|assess|valid)", re.IGNORECASE), QueryIntent.CRITIQUE),
-    # Method explanation
+    (
+        re.compile(r"(survey|overview|summar|review\s+of|landscape|taxonomy)", re.IGNORECASE),
+        QueryIntent.SURVEY,
+    ),
+    (
+        re.compile(r"(what\s+(are|is)\s+the\s+(main|key|recent|latest))", re.IGNORECASE),
+        QueryIntent.SURVEY,
+    ),
     (
         re.compile(
             r"(how\s+(does|do|is|are|works?)|explain|descri|method|approach|algorithm|architecture)",
@@ -110,15 +167,6 @@ _INTENT_PATTERNS: list[tuple[re.Pattern, QueryIntent]] = [
     (
         re.compile(r"(propos|present|introduc|design)", re.IGNORECASE),
         QueryIntent.METHOD_EXPLANATION,
-    ),
-    # Survey
-    (
-        re.compile(r"(survey|overview|summar|review\s+of|landscape|taxonomy)", re.IGNORECASE),
-        QueryIntent.SURVEY,
-    ),
-    (
-        re.compile(r"(what\s+(are|is)\s+the\s+(main|key|recent|latest))", re.IGNORECASE),
-        QueryIntent.SURVEY,
     ),
 ]
 

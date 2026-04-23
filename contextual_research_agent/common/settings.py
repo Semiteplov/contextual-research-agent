@@ -81,6 +81,16 @@ class QdrantSettings(BaseSettings):
     port: int = 6333
 
 
+class OpenRouterSettings(BaseSettings):
+    """OpenRouter API settings."""
+
+    model_config = _make_settings_config("OPENROUTER_")
+
+    api_key: SecretStr = SecretStr("")
+    default_model: str = "openai/gpt-5.4-mini"
+    host: str = "https://openrouter.ai/api/v1"
+
+
 class AppSettings(BaseSettings):
     """Application settings."""
 
@@ -109,6 +119,10 @@ class AppSettings(BaseSettings):
         if mlflow.artifact_root is None and self.s3.bucket:
             object.__setattr__(mlflow, "artifact_root", f"{self.s3.uri}/mlflow")
         return mlflow
+
+    @cached_property
+    def openrouter(self) -> OpenRouterSettings:
+        return OpenRouterSettings()
 
     @property
     def is_production(self) -> bool:

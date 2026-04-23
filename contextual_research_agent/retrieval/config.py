@@ -73,7 +73,7 @@ class RerankConfig:
     """Cross-encoder reranking configuration."""
 
     enabled: bool = True
-    model: str = "BAAI/bge-reranker-v2-m3"
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     top_k: int = 20
     batch_size: int = 16
     device: str | None = None
@@ -92,7 +92,7 @@ class QueryAnalysisConfig:
 class ContextAssemblyConfig:
     """Post-retrieval context."""
 
-    max_tokens: int = 4096
+    max_tokens: int = 6144
     ordering: Literal["document_then_chunk", "score"] = "document_then_chunk"
     include_metadata: bool = True
     separator: str = "\n\n---\n\n"

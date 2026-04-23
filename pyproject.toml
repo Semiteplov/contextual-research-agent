@@ -21,6 +21,7 @@ dependencies = [
     "mlflow>=3.8.1",
     "numpy>=2.4.1",
     "pandas>=2.3.3",
+    "peft>=0.18.1",
     "psycopg2-binary>=2.9.11",
     "pyarrow>=22.0.0",
     "pydantic>=2.12.5",

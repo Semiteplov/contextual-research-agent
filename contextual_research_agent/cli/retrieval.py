@@ -6,9 +6,6 @@ import random
 from pathlib import Path
 from typing import Any
 
-import mlflow
-import psycopg2
-
 from contextual_research_agent.common.logging import get_logger
 from contextual_research_agent.common.settings import get_settings
 from contextual_research_agent.db.connection import get_connection
@@ -18,7 +15,6 @@ from contextual_research_agent.db.repositories.knowledge_graph import (
 from contextual_research_agent.ingestion.embeddings.hf_embedder import create_hf_embedder
 from contextual_research_agent.ingestion.vectorstores.qdrant_store import (
     QdrantStore,
-    _payload_to_chunk,
     create_qdrant_store,
 )
 from contextual_research_agent.retrieval.config import (

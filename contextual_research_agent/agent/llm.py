@@ -47,13 +47,17 @@ class LLMProvider(ABC):
         max_tokens: int = 2048,
     ) -> GenerationResult: ...
 
+    @abstractmethod
+    async def close(self) -> None:
+        """Close HTTP client. Override in subclasses."""
+
 
 class OllamaProvider(LLMProvider):
     def __init__(
         self,
         model: str = "qwen3:8b",
         host: str = "http://localhost:11434",
-        timeout: float = 300.0,
+        timeout: float = 1200.0,
     ):
         self._model = model
         self._host = host.rstrip("/")
@@ -92,6 +96,7 @@ class OllamaProvider(LLMProvider):
             "model": self._model,
             "messages": messages,
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -142,7 +147,7 @@ class LlamaCppProvider(LLMProvider):
         self,
         model: str = "qwen3-4b",
         host: str = "http://localhost:8080",
-        timeout: float = 300.0,
+        timeout: float = 1200.0,
     ):
         self._model = model
         self._host = host.rstrip("/")
@@ -227,6 +232,12 @@ def create_llm_provider(
         return OllamaProvider(
             model=model or "qwen3:8b",
             host=host or "http://localhost:11434",
+        )
+
+    if provider == "llamacpp":
+        return LlamaCppProvider(
+            model=model or "qwen3-8b",
+            host=host or "http://localhost:8080",
         )
 
     raise ValueError(f"Unknown LLM provider: {provider}")

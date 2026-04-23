@@ -426,6 +426,60 @@ LLM-based extraction зависит от модели и prompt. Qwen3-4B (Q4_K_
 - **Cross-document entity resolution**: "BERT" в одной статье и "bert-base-uncased" в другой — разные entity. Нужна нормализация.
 - **Metadata enrichment из Semantic Scholar**: citation_count, influential_citation_count.
 
+## Experimental Results
+ 
+### Оптимальная конфигурация
+ 
+| Component | Value | Evidence |
+|---|---|---|
+| Embedding model | Qwen3-Embedding-0.6B (1024d, 600M) | +23-55% MRR vs bge-large-en, mpnet, MiniLM |
+| Chunk size | 512 tokens | Optimal: 256 = −10% MRR, 1024 = −8% MRR |
+| merge_peers | True | Critical: −15-18% MRR when disabled |
+| include_context | True | +8-9% MRR |
+| Sparse (BM25) | Enabled, weight=0.3 | Marginal negative (−4% MRR), kept for hybrid |
+| Entity graph | Enabled | +5-8% MRR contribution |
+| Paper-level | Enabled | +3-5% MRR via document-level matching |
+| Reranker | cross-encoder/ms-marco-MiniLM-L-6-v2 | Best Pareto: +3.5% MRR, 417ms (vs 2160ms bge) |
+| Fusion | RRF (k=60) | Standard, calibrated weights per channel |
+ 
+### IR metrics (best config, 276 queries)
+ 
+| Metric | Value |
+|---|---|
+| MRR | 0.654 |
+| P@1 | 0.500 |
+| NDCG@10 | 0.417 |
+| HR@10 | 0.957 |
+| Latency (p50) | 417ms |
+ 
+### Embedding comparison (4 models, dense only)
+ 
+| Model | Params | Dim | MRR | P@1 |
+|---|---|---|---|---|
+| **Qwen3-Embedding-0.6B** | 600M | 1024 | **0.585** | **0.366** |
+| bge-large-en-v1.5 | 335M | 1024 | 0.433 | 0.188 |
+| all-MiniLM-L6-v2 | 22M | 384 | 0.475 | 0.279 |
+| all-mpnet-base-v2 | 110M | 768 | 0.418 | 0.214 |
+ 
+### Chunking ablation (Qwen3-Emb-0.6B, dense only)
+ 
+| Config | MRR | Δ vs baseline |
+|---|---|---|
+| 512 tokens, merge, context (baseline) | 0.585 | — |
+| 256 tokens | 0.525 | −10.3% |
+| 1024 tokens | 0.537 | −8.2% |
+| No merge_peers | 0.496 | −15.2% |
+| No section context | 0.538 | −8.0% |
+ 
+### Reranker ablation (full pipeline)
+ 
+| Reranker | MRR | Latency |
+|---|---|---|
+| No rerank | 0.632 | 243ms |
+| **MiniLM-L-6-v2 (22M)** | **0.654** | **417ms** |
+| bge-reranker-v2-m3 (568M) | 0.640 | 2160ms |
+| Qwen3-Reranker-0.6B-seq-cls | 0.434 | 25817ms |
+
 ## Воспроизводимость
 
 Полная воспроизводимость эксперимента обеспечивается фиксацией:

@@ -11,6 +11,12 @@ from contextual_research_agent.cli.datasets import (
     resume_download,
     show_dataset,
 )
+from contextual_research_agent.cli.generation import (
+    evaluate_generation,
+)
+from contextual_research_agent.cli.generation import (
+    generate as rag_generate,
+)
 from contextual_research_agent.cli.ingestion import (
     ingest_dataset,
     ingest_file,
@@ -30,6 +36,8 @@ from contextual_research_agent.cli.retrieval import (
 )
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
+from contextual_research_agent.generation.judge_eval import run_judge as evaluate_with_judge
+from contextual_research_agent.generation.no_rag_baseline import no_rag_baseline
 
 
 def main() -> None:
@@ -67,5 +75,10 @@ def main() -> None:
             "retrieval-evaluate": retrieval_evaluate,  # run eval set → IR metrics → MLflow
             "generate-eval-set": generate_eval_set,  # corpus → synthetic eval queries
             "map-eval-queries": map_eval_queries_to_chunks,
+            # Generation commands
+            "generate": rag_generate,
+            "evaluate-generation": evaluate_generation,
+            "judge-evaluation": evaluate_with_judge,
+            "no-rag-baseline": no_rag_baseline,
         }
     )

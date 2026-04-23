@@ -18,10 +18,6 @@ from contextual_research_agent.retrieval.channels.paper_level import PaperLevelC
 from contextual_research_agent.retrieval.channels.sparse import QdrantSparseBackend, SparseChannel
 from contextual_research_agent.retrieval.config import FusionConfig, RetrievalConfig
 from contextual_research_agent.retrieval.fusion import FusionStrategy, create_fusion_strategy
-from contextual_research_agent.retrieval.metrics import (
-    RetrievalOperationalMetrics,
-    compute_operational_metrics,
-)
 from contextual_research_agent.retrieval.query import QueryAnalyzer, QueryIntent, QueryPlan
 from contextual_research_agent.retrieval.reranking import Reranker, create_reranker
 from contextual_research_agent.retrieval.types import (

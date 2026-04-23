@@ -113,3 +113,45 @@ python main.py retrieval-evaluate eval/test_v1.json \
     --experiment-name=retrieval_test \
     --run-name=dense_rerank     # Прогнать evaluation
 ```
+
+## Generation
+```bash
+# Factual QA с auto-detected mode
+python main.py generate "How does LoRA reduce trainable parameters?" \
+    --collection=peft_hybrid \
+    --llm-model=qwen3:8b \
+    --channels=dense,sparse,graph_entity,paper_level \
+    --rerank=True
+
+# Explicit cognitive mode
+python main.py generate "Compare LoRA and QLoRA memory efficiency" \
+    --mode=comparison \
+    --collection=peft_hybrid
+
+# Verbose mode (показывает промпты)
+python main.py generate "What are the limitations of prefix-tuning?" \
+    --mode=critical_review \
+    --verbose
+
+# Полная оценка с LLM-as-judge
+python main.py evaluate-generation eval/peft_gold_v3_mapped.json \
+    --collection=peft_hybrid \
+    --llm-model=qwen3:8b \
+    --channels=dense,sparse,graph_entity,paper_level \
+    --rerank=True \
+    --output=eval/results/gen_qwen3_8b_full.json \
+    --experiment-name=generation \
+    --run-name=qwen3_8b_full_rerank
+
+# Быстрый тест (без judge, 20 queries)
+python main.py evaluate-generation eval/peft_gold_v3_mapped.json \
+    --skip-judge \
+    --max-queries=20 \
+    --output=eval/results/gen_quick_test.json
+
+# С отдельной judge-моделью
+python main.py evaluate-generation eval/peft_gold_v3_mapped.json \
+    --llm-model=qwen3:4b \
+    --judge-model=qwen3:8b \
+    --output=eval/results/gen_4b_judge_8b.json
+```

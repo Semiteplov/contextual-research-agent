@@ -44,6 +44,9 @@ _MODEL_CONFIGS: dict[str, ModelInstructionConfig] = {
         query_prompt_name="query",
         passage_prompt_name="document",
     ),
+    "bge-large-en": ModelInstructionConfig(
+        query_prefix="Represent this sentence for searching relevant passages: ",
+    ),
 }
 
 
