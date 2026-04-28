@@ -1,7 +1,8 @@
 import fire
 
-from contextual_research_agent.cli.agent import chat, list_docs, query, retrieve, stats, summarize
+from contextual_research_agent.cli.agent import agent_chat, agent_eval, agent_query
 from contextual_research_agent.cli.arxiv import download_arxiv_papers, ingest_arxiv_metadata
+from contextual_research_agent.cli.compare import compare_agent_vs_pipeline
 from contextual_research_agent.cli.datasets import (
     create_dataset,
     create_dataset_from_json,
@@ -34,6 +35,7 @@ from contextual_research_agent.cli.retrieval import (
 from contextual_research_agent.cli.retrieval import (
     retrieve as retrieval_retrieve,
 )
+from contextual_research_agent.cli.robustness import robustness_eval
 from contextual_research_agent.common.logging import setup_logging
 from contextual_research_agent.data.kaggle.download_dataset import download_and_extract_dataset
 from contextual_research_agent.generation.judge_eval import run_judge as evaluate_with_judge
@@ -63,13 +65,6 @@ def main() -> None:
             "ingest-status": ingest_status,  # check progress
             "reingest-failed": reingest_failed,  # retry failed from report
             "ingestion-analytics": print_ingestion_analytics,
-            # Agent commands
-            "query": query,
-            "summarize": summarize,
-            "retrieve": retrieve,
-            "chat": chat,
-            "stats": stats,
-            "list-docs": list_docs,
             # Retrieval commands
             "retrieval-retrieve": retrieval_retrieve,  # query → multi-channel retrieval
             "retrieval-evaluate": retrieval_evaluate,  # run eval set → IR metrics → MLflow
@@ -80,5 +75,11 @@ def main() -> None:
             "evaluate-generation": evaluate_generation,
             "judge-evaluation": evaluate_with_judge,
             "no-rag-baseline": no_rag_baseline,
+            "robustness-eval": robustness_eval,
+            # Agent
+            "agent-query": agent_query,
+            "agent-eval": agent_eval,
+            "agent-chat": agent_chat,
+            "compare-agent-vs-pipeline": compare_agent_vs_pipeline,
         }
     )

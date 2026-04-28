@@ -10,8 +10,10 @@ dependencies = [
     "asyncio>=4.0.0",
     "docling>=2.70.0",
     "dvc[s3]>=3.66.1",
+    "fastapi>=0.128.0",
     "fastembed>=0.7.3",
     "fire>=0.7.1",
+    "gradio>=5.0.0,<6.0.0",
     "huggingface-hub[hf-xet]>=0.36.0",
     "hydra-core>=1.3.2",
     "langchain==1.1.3",
@@ -29,6 +31,7 @@ dependencies = [
     "qdrant-client>=1.16.2",
     "seaborn>=0.13.2",
     "sentence-transformers>=5.2.0",
+    "sse-starlette>=3.4.1",
     "torch>=2.9.0",
     "transformers>=4.57.6",
 ]

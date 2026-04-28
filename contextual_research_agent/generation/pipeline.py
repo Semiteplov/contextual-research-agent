@@ -187,6 +187,16 @@ class GenerationPipeline:
     ) -> RAGResponse:
         resolved_mode = self._parse_mode(mode) if mode else self._config.default_mode
 
+        if not context or not context.strip():
+            return RAGResponse(
+                answer="The provided sources do not contain enough information to answer this question.",
+                mode=resolved_mode,
+                model=self._llm.model_name,
+                llm_latency_ms=0.0,
+                query=query,
+                total_latency_ms=0.0,
+            )
+
         template = get_prompt_template(
             mode=resolved_mode,
             require_citation=self._config.require_citation,

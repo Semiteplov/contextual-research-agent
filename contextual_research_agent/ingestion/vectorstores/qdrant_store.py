@@ -812,6 +812,134 @@ class QdrantStore:
             }
         return summary
 
+    async def scroll_all_chunk_ids(
+        self,
+        filters: dict[str, Any] | None = None,
+        batch_size: int = 256,
+    ) -> list[str]:
+        """Scroll entire collection and return all chunk_ids.
+
+        Used for random sampling in robustness tests.
+
+        Args:
+            filters: Optional payload filters (e.g. {"document_id": "..."}).
+            batch_size: Number of points per scroll request.
+
+        Returns:
+            List of chunk_id strings.
+        """
+        qdrant_filter = _build_filter(filters) if filters else None
+        all_ids: list[str] = []
+        offset = None
+
+        def _scroll(current_offset):
+            return self._client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qdrant_filter,
+                limit=batch_size,
+                offset=current_offset,
+                with_payload=["chunk_id"],
+                with_vectors=False,
+            )
+
+        t0 = time.monotonic()
+        while True:
+            points, next_offset = await asyncio.to_thread(lambda: _scroll(offset))
+            for point in points:
+                cid = (point.payload or {}).get("chunk_id")
+                if cid:
+                    all_ids.append(cid)
+
+            if next_offset is None or len(points) == 0:
+                break
+            offset = next_offset
+
+        duration_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "Scrolled %d chunk_ids from %s (%.0fms)",
+            len(all_ids),
+            self.collection_name,
+            duration_ms,
+        )
+
+        self._metrics_log.append(
+            StoreOperationMetrics(
+                operation="scroll_all_chunk_ids",
+                collection=self.collection_name,
+                duration_ms=duration_ms,
+                num_items=len(all_ids),
+                success=True,
+            )
+        )
+        return all_ids
+
+    async def get_chunks_by_document(
+        self,
+        document_id: str,
+        batch_size: int = 256,
+    ) -> list[Chunk]:
+        """Get all chunks belonging to a specific document.
+
+        Used for partial-context robustness tests.
+
+        Args:
+            document_id: The document ID to filter by.
+
+        Returns:
+            List of Chunk objects for the given document.
+        """
+        qdrant_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchValue(value=document_id),
+                )
+            ]
+        )
+
+        all_chunks: list[Chunk] = []
+        offset = None
+
+        def _scroll(current_offset):
+            return self._client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=qdrant_filter,
+                limit=batch_size,
+                offset=current_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+        t0 = time.monotonic()
+        while True:
+            points, next_offset = await asyncio.to_thread(lambda: _scroll(offset))
+            for point in points:
+                payload = point.payload or {}
+                all_chunks.append(_payload_to_chunk(payload))
+
+            if next_offset is None or len(points) == 0:
+                break
+            offset = next_offset
+
+        duration_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "Retrieved %d chunks for document %s (%.0fms)",
+            len(all_chunks),
+            document_id,
+            duration_ms,
+        )
+
+        self._metrics_log.append(
+            StoreOperationMetrics(
+                operation="get_chunks_by_document",
+                collection=self.collection_name,
+                duration_ms=duration_ms,
+                num_items=len(all_chunks),
+                success=True,
+            )
+        )
+        return all_chunks
+
 
 def _build_filter(filters: dict[str, Any]) -> models.Filter | None:
     """

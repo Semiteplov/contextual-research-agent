@@ -59,7 +59,9 @@ Question: {query}
 
 Provide a concise summary addressing the question in 3-5 sentences. \
 Focus on the most important points. Do NOT use bullet points or numbered lists. \
-Cite passages using [chunk_id] notation.""",
+Cite passages using [chunk_id] notation. \
+If the context passages section above is empty or contains no text, \
+you MUST refuse to answer regardless of whether you know the answer from training.""",
     ),
     CognitiveMode.CRITICAL_REVIEW: PromptTemplate(
         system=_BASE_SYSTEM
@@ -76,7 +78,9 @@ Question: {query}
 Provide a concise critical analysis in 4-6 sentences. Cover: \
 (1) what the approach claims, (2) key strengths from context, \
 (3) weaknesses or gaps. Do NOT use section headers or bullet points. \
-Cite passages using [chunk_id] notation.""",
+Cite passages using [chunk_id] notation. \
+If the context passages section above is empty or contains no text, \
+you MUST refuse to answer regardless of whether you know the answer from training.""",
     ),
     CognitiveMode.COMPARISON: PromptTemplate(
         system=_BASE_SYSTEM
@@ -93,7 +97,9 @@ Question: {query}
 Compare the methods/approaches in 4-8 sentences. Cover key differences \
 in architecture, efficiency, and performance. State trade-offs concisely. \
 If the context lacks information for a fair comparison, state this explicitly. \
-Do NOT use section headers. Cite passages using [chunk_id] notation.""",
+Do NOT use section headers. Cite passages using [chunk_id] notation. \
+If the context passages section above is empty or contains no text, \
+you MUST refuse to answer regardless of whether you know the answer from training.""",
     ),
     CognitiveMode.METHODOLOGICAL_AUDIT: PromptTemplate(
         system=_BASE_SYSTEM

@@ -264,6 +264,90 @@ Evaluation автоматически сохраняет checkpoint каждые
 
 Основные улучшения: conciseness instructions в verbose-режимах (summarization, critical_review, comparison) + увеличение context/max_tokens с 4096 до 6144 токенов.
 
+### LLM-as-Judge Results (external judges)
+ 
+Оценка качества ответов с помощью внешних моделей (OpenRouter API), устраняющая self-evaluation bias:
+ 
+| Judge Model | Mean Faithfulness | Faithfulness Pass Rate (≥4) | Mean Relevance | Relevance Pass Rate (≥4) |
+|---|---|---|---|---|
+| GPT-5.4 mini | 3.74 | 68.7% | 3.89 | 73.2% |
+| Claude Sonnet 4 | 3.99 | 76.0% | 4.12 | 79.5% |
+ 
+Judge-модели оценивают faithfulness (соответствие ответа контексту) и relevance (соответствие ответа вопросу) по шкале 1–5. Refusal-ответы исключаются из оценки.
+ 
+### Robustness Evaluation
+ 
+Оценка устойчивости генерации при деградированном контексте. Тестирует способность модели отказывать (refusal) при отсутствии или несоответствии контекста, предотвращая галлюцинации.
+ 
+**Три сценария деградации контекста:**
+ 
+| Сценарий | Описание | Ожидание |
+|---|---|---|
+| Empty context | Пустая строка вместо контекста | ~100% refusal |
+| Random context | 10 случайных чанков, не связанных с запросом | Высокий refusal, низкий faithfulness |
+| Partial context | Чанки из правильной статьи, но из нерелевантных секций | Умеренный refusal |
+ 
+**Агрегированные результаты (276 queries per scenario, seed=42):**
+ 
+| Scenario | Refusal Rate | Non-refusal | Mean Latency |
+|---|---|---|---|
+| Normal RAG | 5.1% | 262 | — |
+| Empty context | **100.0%** | 0 | 0 ms (guard) |
+| Random context | **75.4%** | 68 | 3470 ms |
+| Partial context | **57.6%** | 117 | 4237 ms |
+ 
+**Per-category refusal rates:**
+ 
+| Категория | Normal | Empty | Random | Partial |
+|---|---|---|---|---|
+| factual_qa | 6.4% | 100% | 89.4% | 72.3% |
+| citation_trace | 16.0% | 100% | 80.0% | 88.0% |
+| comparison | 7.6% | 100% | 91.1% | 82.3% |
+| critique | 0.0% | 100% | 58.6% | 31.0% |
+| method_explanation | 0.0% | 100% | 61.7% | 25.5% |
+| survey | 2.0% | 100% | 57.1% | 34.7% |
+ 
+**Ключевые выводы:**
+ 
+1. **Монотонная деградация**: refusal rate демонстрирует ожидаемый порядок empty (100%) > random (75.4%) > partial (57.6%) > normal (5.1%). Модель калиброванно реагирует на качество контекста.
+2. **Mode-dependent robustness**: factual-ориентированные режимы (factual_qa, citation_trace, comparison) устойчивы к деградации контекста (80–91% refusal при random). Рассуждательные режимы (critique, method_explanation, survey) менее устойчивы (57–62% при random), так как модель способна генерировать правдоподобные ответы из parametric knowledge.
+3. **Корпусный эффект в random scenario**: refusal rate (75.4%) — нижняя граница ожидаемого диапазона. Это объясняется тематической однородностью корпуса: все 32 статьи посвящены PEFT-методам, поэтому "случайные" чанки всё равно тематически близки запросам.
+4. **Empty-context guard**: программная проверка пустого контекста до вызова LLM гарантирует 100% refusal с нулевой latency, без расходования LLM-ресурсов.
+**Prompt-level hardening:**
+ 
+Для повышения robustness рассуждательных режимов добавлена инструкция в промпты `summarization`, `critical_review`, `comparison`:
+ 
+```
+If the context passages section above is empty or contains no text,
+you MUST refuse to answer regardless of whether you know the answer from training.
+```
+ 
+Эта инструкция не влияет на нормальный RAG (контекст всегда непустой), но повышает refusal rate при деградированном контексте.
+ 
+**Реализация:**
+ 
+Модуль `generation/robustness_eval.py` реализует:
+ 
+- Три сценария контекстной деградации (empty, random, partial)
+- Сэмплирование случайных чанков из Qdrant с исключением relevant_ids
+- Partial context: чанки из правильной статьи с исключением релевантных секций
+- Checkpointing каждые 25 queries
+- Per-category metrics aggregation
+- MLflow logging (experiment: `robustness`)
+- Опциональный LLM-as-judge для non-refusal ответов
+### Robustness CLI
+ 
+```bash
+# Полный прогон — все сценарии без judge
+python main.py robustness-eval eval/peft_gold_v3_mapped.json \
+    --scenario=all --skip-judge
+ 
+# С judge на random scenario
+python main.py robustness-eval eval/peft_gold_v3_mapped.json \
+    --scenario=random \
+    --judge-model=openai/gpt-5.4-mini
+```
+
 ## Error Analysis (сводка)
 
 Детальный анализ ошибок — см. ERROR_ANALYSIS_RU.md.
@@ -291,7 +375,7 @@ Cosine similarity между embeddings ответов penalizes length mismatch
 
 ### Refusal calibration
 
-Промпт инструктирует модель отказывать при недостатке информации. Порог отказа определяется LLM implicitly и не настраивается. Возможна как over-refusal (ложный отказ при достаточном контексте), так и under-refusal (ответ на основе недостаточного контекста).
+Промпт инструктирует модель отказывать при недостатке информации. Robustness tests показали mode-dependent behavior: factual-режимы (factual_qa, citation_trace) устойчивы (80–91% refusal при random context), но рассуждательные режимы (critique, survey, method_explanation) имеют refusal rate 57–62% при random context — модель способна генерировать правдоподобные но потенциально недостоверные ответы из parametric knowledge. Программный guard для empty context и prompt-level hardening частично решают проблему, но полное решение требует output verification layer или constrained decoding.
 
 ### Judge self-evaluation bias
 
