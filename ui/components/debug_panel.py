@@ -134,4 +134,4 @@ def render_raw_json(response: dict[str, Any]) -> dict:
 
 
 def render_error(error_msg: str) -> str:
-    return f"### ❌ Error\n\n```\n{error_msg}\n```"
+    return f"### Error\n\n```\n{error_msg}\n```"

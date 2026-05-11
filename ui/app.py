@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -67,6 +68,18 @@ _CUSTOM_CSS = """
     border-radius: 6px;
 }
 """
+
+_CITATION_PATTERN = re.compile(r"\s*\[\s*\d{4}\.\d{4,5}(?:_[a-f0-9]+)?_c\d+\s*\]")
+
+
+def _strip_citations(text: str) -> str:
+    if not text:
+        return text
+
+    cleaned = _CITATION_PATTERN.sub("", text)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+([.,;:!?])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 class UIHandlers:
@@ -152,21 +165,22 @@ class UIHandlers:
                     final_response = response
                     answer = response.get("answer", "")
 
+                    display_answer = _strip_citations(answer)
                     if history and history[-1]["role"] == "assistant":
-                        history[-1]["content"] = answer or "_(no answer)_"
+                        history[-1]["content"] = display_answer or "_(no answer)_"
 
                     chunks_table = debug_panel.render_chunks_table(response)
 
                 elif event_type == "error":
                     error = event.get("error", "Unknown error")
                     if history and history[-1]["role"] == "assistant":
-                        history[-1]["content"] = f"❌ **Error:** {error}"
+                        history[-1]["content"] = f"**Error:** {error}"
 
                 yield history, _format_trace(trace_lines), final_response, chunks_table
 
         except Exception as e:
             logger.exception("Streaming query failed")
-            error_msg = f"❌ **Connection error:** {e}"
+            error_msg = f"**Connection error:** {e}"
             if history and history[-1]["role"] == "assistant":
                 history[-1]["content"] = error_msg
             trace_lines.append(error_msg)

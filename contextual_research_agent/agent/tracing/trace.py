@@ -20,6 +20,10 @@ class AgentTrace:
     # Planner
     sub_queries: list[dict] = field(default_factory=list)
 
+    # ParallelExecutor
+    sub_answers: list[dict] = field(default_factory=list)
+    parallel_speedup_factor: float = 1.0
+
     # Retrieval
     retrieved_chunks: list[dict] = field(default_factory=list)
     retrieval_latency_ms: float = 0.0
@@ -51,6 +55,12 @@ class AgentTrace:
         """Extract trace from completed AgentState."""
         critic_fb = state.get("critic_feedback", {})
 
+        speedup = 1.0
+        for event in state.get("trace_events", []):
+            if event.get("node") == "parallel_executor":
+                speedup = event.get("data", {}).get("speedup_factor", 1.0)
+                break
+
         return cls(
             query=state.get("query", ""),
             mode_override=state.get("mode_override"),
@@ -58,6 +68,8 @@ class AgentTrace:
             complexity=state.get("complexity", ""),
             resolved_mode=state.get("resolved_mode", ""),
             sub_queries=state.get("sub_queries", []),
+            sub_answers=state.get("sub_answers", []),
+            parallel_speedup_factor=speedup,
             retrieved_chunks=state.get("retrieval_chunks", []),
             retrieval_latency_ms=state.get("retrieval_latency_ms", 0.0),
             channel_stats=state.get("retrieval_channel_stats", {}),
@@ -87,6 +99,13 @@ class AgentTrace:
                 "resolved_mode": self.resolved_mode,
                 "sub_queries": self.sub_queries,
             },
+            "parallel_execution": {
+                "num_sub_answers": len(self.sub_answers),
+                "speedup_factor": round(self.parallel_speedup_factor, 2),
+                "sub_answers": self.sub_answers,
+            }
+            if self.sub_answers
+            else None,
             "retrieval": {
                 "num_chunks": len(self.retrieved_chunks),
                 "latency_ms": round(self.retrieval_latency_ms, 1),
@@ -125,6 +144,8 @@ class AgentTrace:
             "retry_count": self.retry_count,
             "tokens": self.generation_tokens,
             "status": self.status,
+            "num_sub_queries": len(self.sub_queries),
+            "parallel_speedup": round(self.parallel_speedup_factor, 2),
         }
 
     def get_chunks_for_display(self) -> list[dict[str, Any]]:
@@ -147,7 +168,6 @@ class AgentTrace:
         for event in self.events:
             node = event.get("node", "unknown")
             ms = event.get("latency_ms", 0)
-
             if node in breakdown:
                 breakdown[node] += ms
             else:

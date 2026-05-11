@@ -8,6 +8,7 @@ _NODE_LABELS = {
     "planner": "Planner",
     "retriever": "Retriever",
     "generator": "Generator",
+    "parallel_executor": "Parallel Executor",
     "critic": "Critic",
     "synthesizer": "Synthesizer",
 }
@@ -60,7 +61,7 @@ def format_node_event(event: dict[str, Any]) -> str | None:
 
     if event_type == "error":
         error = event.get("error", "")
-        return f"❌ **Pipeline error:** {error}"
+        return f"**Pipeline error:** {error}"
 
     return None
 
@@ -123,8 +124,25 @@ def _format_node_details(node: str, data: dict[str, Any]) -> str:
 
     if node == "synthesizer":
         mode = data.get("mode", "")
+        num_sub = data.get("num_sub_answers", 0)
+        if num_sub:
+            return f"merged {num_sub} sub-answers · mode=`{mode}`"
         if mode:
             return f"mode=`{mode}`"
+
+    if node == "parallel_executor":
+        n = data.get("num_sub_queries", 0)
+        ok = data.get("num_succeeded", 0)
+        speedup = data.get("speedup_factor", 1.0)
+        wall = data.get("wall_clock_ms", 0)
+        serial = data.get("serial_estimate_ms", 0)
+        modes = data.get("sub_query_modes", [])
+        parts = [f"{ok}/{n} sub-queries"]
+        if modes:
+            parts.append(f"modes=[{', '.join(f'`{m}`' for m in modes)}]")
+        if speedup > 1.05:
+            parts.append(f"speedup={speedup}× (wall={wall:.0f}ms vs serial≈{serial:.0f}ms)")
+        return " · ".join(parts)
 
     if node == "planner":
         n = data.get("num_sub_queries", 0)

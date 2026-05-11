@@ -6,6 +6,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from contextual_research_agent.agent.llm import LLMProvider
+from contextual_research_agent.agent.node_executor import ParallelExecutorNode
 from contextual_research_agent.agent.nodes.critic import CriticNode
 from contextual_research_agent.agent.nodes.generator import GeneratorNode
 from contextual_research_agent.agent.nodes.planner import PlannerNode
@@ -33,14 +34,28 @@ def _route_after_router(state: AgentState) -> str:
     return "retriever"
 
 
+def _route_after_retriever(state: AgentState) -> str:
+    if state.get("status") == AgentStatus.FAILED.value:
+        return "synthesizer"
+
+    complexity = state.get("complexity", QueryComplexity.SIMPLE.value)
+    if complexity in (QueryComplexity.COMPLEX.value, QueryComplexity.MULTI_ASPECT.value):
+        return "parallel_executor"
+    return "generator"
+
+
 def _route_after_critic(state: AgentState) -> str:
     """Decide next node after Critic: retry or finish."""
     feedback = state.get("critic_feedback", {})
     verdict = feedback.get("verdict", CriticVerdict.PASS.value)
     retry_count = state.get("retry_count", 0)
+    complexity = state.get("complexity", QueryComplexity.SIMPLE.value)
 
     if state.get("status") == AgentStatus.FAILED.value:
-        return "synthesizer"
+        return "end"
+
+    if complexity in (QueryComplexity.COMPLEX.value, QueryComplexity.MULTI_ASPECT.value):
+        return "end"
 
     if verdict == CriticVerdict.FAIL.value and retry_count == 1:
         events = state.get("trace_events", [])
@@ -69,6 +84,7 @@ def build_agent_graph(
     planner = PlannerNode(llm=llm)
     retriever = RetrieverNode(pipeline=retrieval_pipeline)
     generator = GeneratorNode(pipeline=generation_pipeline)
+    parallel_executor = ParallelExecutorNode(generation_pipeline=generation_pipeline)
     critic = CriticNode(llm=llm)
     synthesizer = SynthesizerNode(llm=llm)
 
@@ -80,6 +96,7 @@ def build_agent_graph(
     graph.add_node("planner", planner)
     graph.add_node("retriever", retriever)
     graph.add_node("generator", generator)
+    graph.add_node("parallel_executor", parallel_executor)
     graph.add_node("critic", critic)
     graph.add_node("synthesizer", synthesizer)
 
@@ -99,13 +116,14 @@ def build_agent_graph(
     # Planner → Retriever
     graph.add_edge("planner", "retriever")
 
-    # Retriever → Generator (with failure check)
+    # Retriever → Generator or ParallelExecutor
     graph.add_conditional_edges(
         "retriever",
-        _check_failed,
+        _route_after_retriever,
         {
-            "continue": "generator",
-            "end": "synthesizer",
+            "generator": "generator",
+            "parallel_executor": "parallel_executor",
+            "synthesizer": "synthesizer",
         },
     )
 
@@ -119,20 +137,44 @@ def build_agent_graph(
         },
     )
 
+    graph.add_conditional_edges(
+        "parallel_executor",
+        _check_failed,
+        {
+            "continue": "synthesizer",
+            "end": "synthesizer",
+        },
+    )
+
     # Critic → Generator (retry) or Synthesizer (done)
     graph.add_conditional_edges(
         "critic",
         _route_after_critic,
         {
             "generator": "generator",
-            "synthesizer": "synthesizer",
+            "end": END,
         },
     )
 
-    # Synthesizer → END
-    graph.add_edge("synthesizer", END)
+    def _after_synthesizer(state: AgentState) -> str:
+        if state.get("status") == AgentStatus.FAILED.value:
+            return "end"
+        events = state.get("trace_events", [])
+        critic_already_ran = any(e.get("node") == "critic" for e in events)
+        if critic_already_ran:
+            return "end"
+        return "critic"
+
+    graph.add_conditional_edges(
+        "synthesizer",
+        _after_synthesizer,
+        {
+            "critic": "critic",
+            "end": END,
+        },
+    )
 
     compiled = graph.compile()
-    logger.info("Multi-agent graph compiled: 6 nodes, conditional routing")
+    logger.info("Multi-agent graph compiled: 7 nodes, conditional routing")
 
     return compiled

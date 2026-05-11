@@ -1,0 +1,56 @@
+mode: factual_qa
+
+base_model: "Qwen/Qwen3-8B"
+load_in_4bit: false
+max_seq_length: 4096
+
+train_file: "training/data/v2/factual_qa_combined.jsonl"
+val_split: 0.1
+seed: 42
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.1
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  bias: "none"
+
+training:
+  num_train_epochs: 1
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 5e-5
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  max_grad_norm: 0.3
+  optim: "adamw_torch"
+
+  logging_steps: 5
+  save_strategy: "steps"
+  save_steps: 50
+  eval_strategy: "steps"
+  eval_steps: 50
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+
+  bf16: true
+  gradient_checkpointing: true
+  group_by_length: false
+
+output_dir: "training/output_v2/factual_qa"
+adapter_save_dir: "training/adapters_v2/factual_qa"
+
+mlflow:
+  enabled: true
+  experiment_name: "lora_factual_qa_v2"
+  tracking_uri: ""
