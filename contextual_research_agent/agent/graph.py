@@ -45,7 +45,6 @@ def _route_after_retriever(state: AgentState) -> str:
 
 
 def _route_after_critic(state: AgentState) -> str:
-    """Decide next node after Critic: retry or finish."""
     feedback = state.get("critic_feedback", {})
     verdict = feedback.get("verdict", CriticVerdict.PASS.value)
     retry_count = state.get("retry_count", 0)
@@ -57,7 +56,7 @@ def _route_after_critic(state: AgentState) -> str:
     if complexity in (QueryComplexity.COMPLEX.value, QueryComplexity.MULTI_ASPECT.value):
         return "end"
 
-    if verdict == CriticVerdict.FAIL.value and retry_count == 1:
+    if verdict == CriticVerdict.FAIL.value and retry_count == 0:
         events = state.get("trace_events", [])
         generator_retries = sum(
             1
@@ -67,7 +66,7 @@ def _route_after_critic(state: AgentState) -> str:
         if generator_retries == 0:
             return "generator"
 
-    return "synthesizer"
+    return "end"
 
 
 def _check_failed(state: AgentState) -> str:
